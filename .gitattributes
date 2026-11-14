@@ -1,0 +1,5 @@
+# 줄바꿈을 바꾸지 않는다. 파일마다 CRLF와 LF가 다르다(AGENTS.md 2절 서식).
+* -text
+# diff 머리줄에 C++ 함수 이름을 붙인다.
+*.h diff=cpp
+*.cpp diff=cpp

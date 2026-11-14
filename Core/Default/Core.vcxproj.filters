@@ -1,0 +1,204 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="..\Public\CoreDefine.h">
+      <Filter>98.Default</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CoreMacro.h">
+      <Filter>98.Default</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CoreTypes.h">
+      <Filter>98.Default</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UCoreBase.h">
+      <Filter>90.Base</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CustomMemory.h">
+      <Filter>96.Utility\memory</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CoreStlTypes.h">
+      <Filter>98.Default</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\IHashable.h">
+      <Filter>95.Interface</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UCoreGlobal.h">
+      <Filter>00.Global</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CustomAlloc.h">
+      <Filter>96.Utility\Alloc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\RunTimeMetrics.h">
+      <Filter>99.RuntimeMetric</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\MPMetrics.h">
+      <Filter>99.RuntimeMetric\MP</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\CustomString.h">
+      <Filter>96.Utility\String</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\Packet.h">
+      <Filter>96.Utility\packet</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UJobQueue.h">
+      <Filter>96.Utility\Job</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\ULogger.h">
+      <Filter>01.Manager\Logger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\FWorkerLogChannel.h">
+      <Filter>01.Manager\Logger</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UCoreInstance.h">
+      <Filter>01.Manager</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\IDGenerator.h">
+      <Filter>97.StaticClass\IDGenerator</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UThreadManager.h">
+      <Filter>01.Manager\ThreadManager</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UNetworkManager.h">
+      <Filter>01.Manager\NetworkManager</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UObject.h">
+      <Filter>90.Base\Object</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\USession.h">
+      <Filter>02.NetworkObj\Session</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UListener.h">
+      <Filter>02.NetworkObj\Listener</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\URoom.h">
+      <Filter>02.NetworkObj\Room</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="90.Base">
+      <UniqueIdentifier>{55e3f8d2-71bd-4b5e-ae96-db82dfa04341}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="00.Global">
+      <UniqueIdentifier>{f6831a5a-48ab-4f14-b086-2d0660d57672}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="98.Default">
+      <UniqueIdentifier>{2c99df6b-3450-456c-9a1a-02812f20bfcb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="97.StaticClass">
+      <UniqueIdentifier>{4a0210c4-5e1a-40d7-ba10-583155af9a3e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility">
+      <UniqueIdentifier>{01a7e8ea-cfc3-42e0-9837-13ead835430c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility\memory">
+      <UniqueIdentifier>{b0450914-568f-4880-b651-e059630898aa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility\Alloc">
+      <UniqueIdentifier>{aa454f75-745b-4f16-bdfb-6aeb2dd42c7c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="99.RuntimeMetric">
+      <UniqueIdentifier>{d9f314ce-2b0e-496d-8877-d1c211f911ad}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="99.RuntimeMetric\MP">
+      <UniqueIdentifier>{f4fc4eac-bd7f-48e5-98d2-5c8cab3619f1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility\Job">
+      <UniqueIdentifier>{399e2416-edc3-4001-9cb4-b89629cfa1d5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility\String">
+      <UniqueIdentifier>{64c36716-6ec8-4f5f-ace5-e3d74679616c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="96.Utility\packet">
+      <UniqueIdentifier>{b06f58e6-3c05-40e8-a0c2-31e9c2f70bf8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="01.Manager">
+      <UniqueIdentifier>{09f12e07-389f-4248-a06f-c815fa16660f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="97.StaticClass\IDGenerator">
+      <UniqueIdentifier>{53a276fd-7e80-4e2d-960a-2dce5d895932}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="01.Manager\ThreadManager">
+      <UniqueIdentifier>{fae05536-b96e-48d7-a0c0-736842d3adab}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="01.Manager\NetworkManager">
+      <UniqueIdentifier>{566d6da0-04f0-4abb-a9b8-19b6e755cc1c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="95.Interface">
+      <UniqueIdentifier>{d9429e8d-12c8-49dc-ae1a-2bb2e6792117}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="01.Manager\Logger">
+      <UniqueIdentifier>{3c3329ed-e1b0-4382-aa1b-bab83798dfd0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="90.Base\Object">
+      <UniqueIdentifier>{3207a2cd-ad52-46ae-845c-d68c02061ca7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="02.NetworkObj">
+      <UniqueIdentifier>{f0fbb905-36fb-4f87-ba4a-3955454c3fe1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="02.NetworkObj\Session">
+      <UniqueIdentifier>{36286bcc-643a-405f-ba16-70388378f516}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="02.NetworkObj\Listener">
+      <UniqueIdentifier>{21d09739-3b83-4e1b-9c49-b53dbaa9d571}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="02.NetworkObj\Room">
+      <UniqueIdentifier>{badf670f-35ea-408d-afd7-165b1d2e93b1}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="..\Private\UCoreBase.cpp">
+      <Filter>90.Base</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\CustomMemory.cpp">
+      <Filter>96.Utility\memory</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UCoreGlobal.cpp">
+      <Filter>00.Global</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\CustomAlloc.cpp">
+      <Filter>96.Utility\Alloc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\RunTimeMetrics.cpp">
+      <Filter>99.RuntimeMetric</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\MPMetrics.cpp">
+      <Filter>99.RuntimeMetric\MP</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\Packet.cpp">
+      <Filter>96.Utility\packet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UJobQueue.cpp">
+      <Filter>96.Utility\Job</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\ULogger.cpp">
+      <Filter>01.Manager\Logger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\FWorkerLogChannel.cpp">
+      <Filter>01.Manager\Logger</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UCoreInstance.cpp">
+      <Filter>01.Manager</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\IDGenerator.cpp">
+      <Filter>97.StaticClass\IDGenerator</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UThreadManager.cpp">
+      <Filter>01.Manager\ThreadManager</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UNetworkManager.cpp">
+      <Filter>01.Manager\NetworkManager</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UObject.cpp">
+      <Filter>90.Base\Object</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\USession.cpp">
+      <Filter>02.NetworkObj\Session</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UListener.cpp">
+      <Filter>02.NetworkObj\Listener</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\URoom.cpp">
+      <Filter>02.NetworkObj\Room</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

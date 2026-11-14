@@ -1,0 +1,181 @@
+{
+  "source": "D:/__job/Project/Network2D_Portfolio/직접작성/기존_C++_참고/새_ServerFramework",
+  "info": "기존 Core와 Server 작업본에서 복사한 개발 시작점. 사용자 코드와 과거 AI 기여 구분은 원본 기록 참조. 이 목록은 생성 당시 해시이며 개발하며 변경 가능.",
+  "files": [
+    {
+      "file": "MultiplayerGame.sln",
+      "sha256": "8cb3abbf56c3cf97626e0b6d746b53e1c63bfec6122a91ac8581639ea2600eb6"
+    },
+    {
+      "file": "Core/Default/Core.vcxproj",
+      "sha256": "a05cfb175f868ac03cccfac9aa72d5dad73b29511a04e48b4b16877309df0e57"
+    },
+    {
+      "file": "Core/Default/Core.vcxproj.filters",
+      "sha256": "93fd4fb5e4d3103e3d31f1240877cbba3201578ae6290fc23930ba92e4b2caa4"
+    },
+    {
+      "file": "Core/Public/ACoreBase.h",
+      "sha256": "498185e381f6f0ed63648501640efbbfc951565c0a82791addbe8b75180949f3"
+    },
+    {
+      "file": "Core/Public/BlockingQueue.h",
+      "sha256": "26345c0582bfac63b85f86d0a073a1d0ad24725d1798bc3a6ba8b9b9dae522c2"
+    },
+    {
+      "file": "Core/Public/CoreConcept.h",
+      "sha256": "5dc31c5ac4f537bade8bf2bf0a855f7feb4268abe5f75a4592510f9ad8c6426e"
+    },
+    {
+      "file": "Core/Public/CoreDefine.h",
+      "sha256": "224972b4759889c906688f021537421f351ab6d7404bf42c61c653c978f53f72"
+    },
+    {
+      "file": "Core/Public/CoreMacro.h",
+      "sha256": "a32eec31aef944fd01c7aadee50db37e931c67a0fb288a4a77da1f81fcfc2a1b"
+    },
+    {
+      "file": "Core/Public/CoreStlTypes.h",
+      "sha256": "6e7d3ae628889719f6778cadfeb751c0f9a75f8b26ac95677a48e9f330704d78"
+    },
+    {
+      "file": "Core/Public/CoreTypes.h",
+      "sha256": "5b2e499ca30679021c4c310767d29ced583d1c66057dffbb391d696037f98a03"
+    },
+    {
+      "file": "Core/Public/CustomAlloc.h",
+      "sha256": "24319d42c7a2cdab7ed0e2f3767add5c7713b4f282a9b3becb1c64196b7b5570"
+    },
+    {
+      "file": "Core/Public/CustomMemory.h",
+      "sha256": "6810bded5da7a3376fb4e2e44d07e33294b6516dd854e4d05839d9bb475ba716"
+    },
+    {
+      "file": "Core/Public/CustomString.h",
+      "sha256": "b2c750e518f05c58682893b668f04a5777efffbc26bf328d405e7ce0b31c4406"
+    },
+    {
+      "file": "Core/Public/Deleter.h",
+      "sha256": "31ae5dad0e668ab3d5d7ad3fa85e0b3fd45f83c5038f1f5e8a3c6dabe500f225"
+    },
+    {
+      "file": "Core/Public/GlobalFunc.h",
+      "sha256": "1bc9afe1df231c876e51aa541348fe6f83da3da611c20f4d81fa8dbf68881e3f"
+    },
+    {
+      "file": "Core/Public/IDGenerator.h",
+      "sha256": "1f14e8a4d46dd0baa7b1cc3660719ee39f0803b32f0247feaa2902ce1f3099ee"
+    },
+    {
+      "file": "Core/Public/JobQueue.h",
+      "sha256": "1e4d031924829c72b9b8f16cc24c4529dca2179a93d8b5c9def7f2cf44a2d685"
+    },
+    {
+      "file": "Core/Public/MPMetrics.h",
+      "sha256": "2b950da362e949f45ef0e68f16904e5c5f16604603abb6cde395f784911a0fe7"
+    },
+    {
+      "file": "Core/Public/Packet.h",
+      "sha256": "8051046e2573c4c0ad6b8db643f12f799731083fba0bf9f08ee243364dcf04fe"
+    },
+    {
+      "file": "Core/Public/RunTimeMetrics.h",
+      "sha256": "021f203e3b8bc7de7e9d5bc891af0e4e2e8eced53e0d4e74f12b518b2a9aa7d2"
+    },
+    {
+      "file": "Core/Public/UCoreGlobal.h",
+      "sha256": "81617614cce6c0222af1fff11667ca1822c5c1199aabcce29c6273e1b9b84594"
+    },
+    {
+      "file": "Core/Private/ACoreBase.cpp",
+      "sha256": "4b3816ea7b3760f9c2c8893bfd41a96afb31d923181ffba0741191acf3e5b37e"
+    },
+    {
+      "file": "Core/Private/CustomAlloc.cpp",
+      "sha256": "b3fa2875e4b175906b5ea998583b169400b690b5efc7d81abe2c63b176017acd"
+    },
+    {
+      "file": "Core/Private/CustomMemory.cpp",
+      "sha256": "4f3afb05da3ce5179ecce32221d6a64292dab7e746e28e78bdf8e9c4a66916fe"
+    },
+    {
+      "file": "Core/Private/GlobalFunc.cpp",
+      "sha256": "46ce0608fd32f1908714e8f783a633e468845fa5f8e0b20b28106d465c73090e"
+    },
+    {
+      "file": "Core/Private/IDGenerator.cpp",
+      "sha256": "cd478c600b88deb4453b6cf6d8fdc68e5143c68b6d6d64b4ba600caee90f1737"
+    },
+    {
+      "file": "Core/Private/JobQueue.cpp",
+      "sha256": "e5dfd2917149f8e8510259daceb6d8b76b4a4ab5638e3dc84faaf685a16ba8f4"
+    },
+    {
+      "file": "Core/Private/MPMetrics.cpp",
+      "sha256": "f5a6b08eb17935fea311787aba441c356e8f6fa7179b7fcb065a732095c55354"
+    },
+    {
+      "file": "Core/Private/Packet.cpp",
+      "sha256": "1a09859abad3c2e54863cd8e9b6bf16b72dfc8b6667dfee56185df16e5ce5c4d"
+    },
+    {
+      "file": "Core/Private/RunTimeMetrics.cpp",
+      "sha256": "24dbb79fb90c97a9894a402849e04ec2550cd6be4b572e9e68904073ae4490da"
+    },
+    {
+      "file": "Core/Private/UCoreGlobal.cpp",
+      "sha256": "6b5ff968e2110bca67aedac1a478f4268e3cb6f9e5464eac01f7149b58641d55"
+    },
+    {
+      "file": "Server/Default/Main.cpp",
+      "sha256": "e757ddcc3a6768f7362873164ea11d84211fa4b77d87a026cf44446e44f967ed"
+    },
+    {
+      "file": "Server/Default/Server.filters",
+      "sha256": "0574f68e5407b3fa8ca754754fbdcd79f56e9ca2f1921323cdb05fab3e4f3698"
+    },
+    {
+      "file": "Server/Default/Server.vcxproj",
+      "sha256": "98dd85ca1542f6eb4f66c84bc14495bf269de300ecc713d5acd94716e8f335d5"
+    },
+    {
+      "file": "Server/Default/Server.vcxproj.filters",
+      "sha256": "55e4e581024b16fd60bdad105715a80ee76967edaccbc52a5497b82d687707e7"
+    },
+    {
+      "file": "Server/Public/ServerApp.h",
+      "sha256": "1c0ad31eb60c95aeab34e6ab30b4e36aef8cd7345c224c26ba749222bdd1f2e4"
+    },
+    {
+      "file": "Server/Private/ServerApp.cpp",
+      "sha256": "1463ad13fbc74287914872ca18d0813832f26e84b97f4e67f98c3d7bc8c590ce"
+    },
+    {
+      "file": "Tests/MemoryContracts.cpp",
+      "sha256": "77a94507697e3363c6ae8ec0df041f9f00d49f5fe7321395a61100f4c55123c6"
+    },
+    {
+      "file": "Tests/MemoryContracts.vcxproj",
+      "sha256": "42331bb42c9998688a6d73f22197e4ed74481ca822016e8486cf83030c4411a2"
+    },
+    {
+      "file": "Tests/MemoryWalkthrough.cpp",
+      "sha256": "24db6c95168535d3131928273c79a8da8438be47f076198e2845bf6d5fc6c138"
+    },
+    {
+      "file": "Tests/MemoryWalkthrough.vcxproj",
+      "sha256": "4411d8eb985360bee54e8dd070e61c5f2299197fad0160a21d1d2d870f238f6a"
+    }
+  ],
+  "after_copy": [
+    {
+      "file": "MultiplayerGame.sln",
+      "sha256": "490bfa25a6af81b7fef4e4c1e33b07908aa21908eba5a1db442756075105ead7",
+      "reason": "C# GameClient2D project added to the solution"
+    },
+    {
+      "file": "GameClient2D/",
+      "reason": "C# Windows Forms project generated by dotnet template; game logic not yet implemented"
+    }
+  ]
+}
