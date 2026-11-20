@@ -65,55 +65,6 @@
       delete instance; \
   }
 
-
-// 메모리 풀 MakeShared를 이용하는 스마트 포인터 싱글톤
-#define DECLARE_SHARED_INSTANCE(className) \
-  private: \
-      class FCreateKey { \
-          friend class className; \
-          FCreateKey() = default; \
-        public: \
-          FCreateKey(const FCreateKey&) = default; \
-      }; \
-  public: \
-      explicit className(FCreateKey); \
-      virtual ~className(); \
-      NO_COPY(className) \
-      static SHPTR<className> GetInstance(); \
-      static bool DeleteInstance(); \
-  private: \
-      static SHPTR<className> _Instance; \
-      static SHARED_MUTEX _InstanceMutex;
-
-#define IMPLEMENT_SHARED_INSTANCE(className) \
-  SHPTR<className> className::_Instance{}; \
-  SHARED_MUTEX className::_InstanceMutex{}; \
-  className::className(FCreateKey) {} \
-  className::~className() {} \
-  SHPTR<className> className::GetInstance() \
-  { \
-      { \
-          SHARED_LOCK_GUARD lock{ _InstanceMutex }; \
-          if (_Instance) \
-              return _Instance; \
-      } \
-      EXCLUSIVE_LOCK_GUARD lock{ _InstanceMutex }; \
-      if (!_Instance) \
-          _Instance = MakeShared<className>(FCreateKey{}); \
-      return _Instance; \
-  } \
-  bool className::DeleteInstance() \
-  { \
-      SHPTR<className> instance; \
-      { \
-          EXCLUSIVE_LOCK_GUARD lock{ _InstanceMutex }; \
-          if (!_Instance) return true; \
-          if (_Instance.use_count() != 1) return false; \
-          instance.swap(_Instance); \
-      } \
-      return true; \
-  }
-
 // 강제로 크래쉬를 일으키는 매크로
 #define CRASH(cause) 	\
 {											\

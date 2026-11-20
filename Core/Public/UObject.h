@@ -10,7 +10,10 @@ protected:
 	virtual ~UObject();
 
 protected:
-	SHPTR<UCoreInstance> GetCoreInstance() const { return _CoreInstance.lock(); }
+	SHPTR<UCoreInstance> GetCoreInstance() const {
+		FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UObject", "GetCoreInstance", "Core/Public/UObject.h", static_cast<Core::uint32>(__LINE__)}};
+		return _CoreInstance.lock();
+	}
 
 private:
 	WKPTR<UCoreInstance>	_CoreInstance;

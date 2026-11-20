@@ -2,6 +2,7 @@
 
 #include "CoreTypes.h"
 #include "CoreMacro.h"
+#include "RuntimeTrace.h"
 
 SPACE_H(Server)
 
@@ -32,6 +33,7 @@ private:
 	EResult WaitUnix() noexcept;
 #endif
 
+	Core::FRuntimeTraceID _RuntimeTraceID;
 	struct FImpl;
 	Core::UQPTR<FImpl> _Impl;
 };

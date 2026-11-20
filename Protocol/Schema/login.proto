@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+// 로그인. 성공하면 서버가 기본 방에 자동으로 입장시킨다.
+package multiplayer.protocol;
+option csharp_namespace = "Multiplayer.Protocol";
+
+// C++ 에서는 enum 값이 같은 범위에 놓이므로 LOGIN_RESULT_ 접두사를 붙인다.
+enum ELoginResult {
+  LOGIN_RESULT_NONE = 0;
+  LOGIN_RESULT_SUCCESS = 1;
+  LOGIN_RESULT_INVALID_NICKNAME = 2;    // 닉네임 규칙 위반
+  LOGIN_RESULT_DUPLICATE_NICKNAME = 3;  // 이미 쓰는 닉네임
+  LOGIN_RESULT_ALREADY_LOGGED_IN = 4;   // 같은 연결에서 두 번 로그인
+  LOGIN_RESULT_ROOM_FULL = 5;           // 기본 방 정원 초과
+}
+
+// CS_LOGIN
+message CSLogin {
+  string nickname = 1;
+}
+
+// SC_LOGIN_RESULT
+message SCLoginResult {
+  ELoginResult result = 1;
+  // 성공했을 때 기본 방의 현재 인원 수(자신 포함). 참가자 목록은 CSRoomUsers로 따로 요청한다.
+  uint32 user_count = 2;
+}

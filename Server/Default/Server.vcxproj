@@ -21,10 +21,14 @@
   <ItemGroup>
     <ClInclude Include="..\Public\ServerApp.h" />
     <ClInclude Include="..\Public\UServerInput.h" />
+    <ClInclude Include="..\Public\UServerListener.h" />
+    <ClInclude Include="..\Public\UServerSession.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Private\ServerApp.cpp" />
     <ClCompile Include="..\Private\UServerInput.cpp" />
+    <ClCompile Include="..\Private\UServerListener.cpp" />
+    <ClCompile Include="..\Private\UServerSession.cpp" />
     <ClCompile Include="Main.cpp" />
   </ItemGroup>
   <ItemGroup>

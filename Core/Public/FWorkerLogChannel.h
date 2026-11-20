@@ -24,7 +24,7 @@ public:
     };
 
     explicit FWorkerLogChannel(uint64 channelID) noexcept;
-    ~FWorkerLogChannel() = default;
+    ~FWorkerLogChannel();
     NO_COPY(FWorkerLogChannel)
 
     // 생산 시작 전 한 번 설정한다. 콜백과 context는 마지막 호출이 끝날 때까지 유효해야 한다.
@@ -45,6 +45,7 @@ public:
     bool FinishOutput() noexcept;
 
 private:
+    FRuntimeTraceID _RuntimeTraceID;
     struct FEntry
     {
         FLogBatch Batch;

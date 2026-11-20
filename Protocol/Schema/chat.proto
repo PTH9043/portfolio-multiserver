@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+// 채팅. 서버는 받은 채팅을 보낸 사람의 방 전체에 전달한다.
+package multiplayer.protocol;
+option csharp_namespace = "Multiplayer.Protocol";
+
+// CS_CHAT
+message CSChat {
+  string text = 1;
+}
+
+// SC_CHAT
+message SCChat {
+  string nickname = 1;  // 보낸 사람
+  string text = 2;
+}

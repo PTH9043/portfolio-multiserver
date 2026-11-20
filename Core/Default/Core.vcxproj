@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Public\UCoreBase.h" />
+    <ClInclude Include="..\Public\RuntimeTrace.h" />
     <ClInclude Include="..\Public\CoreDefine.h" />
     <ClInclude Include="..\Public\CoreMacro.h" />
     <ClInclude Include="..\Public\CoreStlTypes.h" />
@@ -46,6 +47,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Private\UCoreBase.cpp" />
+    <ClCompile Include="..\Private\RuntimeTrace.cpp" />
     <ClCompile Include="..\Private\CustomAlloc.cpp" />
     <ClCompile Include="..\Private\CustomMemory.cpp" />
     <ClCompile Include="..\Private\IDGenerator.cpp" />

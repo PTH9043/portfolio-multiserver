@@ -11,16 +11,18 @@ SPACE_H(Server)
 
 using namespace Core;
 
-// 서버의 가장 작은 뼈대다. 패킷과 세션은 아직 없다.
+// 서버의 뼈대다. 127.0.0.1의 지정 포트에서 접속을 받는다. 정해진 패킷은 아직 없다.
 class UServerApp final
 {
 public:
-	UServerApp() = default;
+	UServerApp();
 	~UServerApp();
 	NO_COPY(UServerApp);
 
-	// 제어 스레드에서 호출한다. Core 준비가 성공하면 true, 이미 시작했거나 실패하면 false.
-	bool Start();
+	// 제어 스레드에서 RegisterWorkers보다 먼저 호출한다. Core를 준비하고 127.0.0.1:port에서 리스너를 시작한다.
+	// 성공하면 true, 이미 시작했거나 준비·리스너 시작에 실패하면 false다. 실패 원인은 콘솔에 쓴다.
+	// 리스너의 accept가 오류로 끝나면 Logger에 Error로 남기고 네트워크 실패로 서버 종료를 요청한다.
+	bool Start(uint16 port);
 
 	// 제어 스레드에서 호출한다. 워커 함수는 JoinWorkers 전까지 실행되지 않는다.
 	bool RegisterWorkers(uint32 networkWorkerCount);
@@ -50,6 +52,7 @@ private:
 	void LogProducerFinished() noexcept;
 	void ClearObject();
 
+	FRuntimeTraceID _RuntimeTraceID;
 	ATOMIC<bool>	_bRunning{ false };
 	ATOMIC<EStopState> _StopState{ EStopState::NotRequested };
 	ATOMIC<bool>	_NetworkFailed{ false };

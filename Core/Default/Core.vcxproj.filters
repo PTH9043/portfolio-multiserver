@@ -73,6 +73,9 @@
     <ClInclude Include="..\Public\URoom.h">
       <Filter>02.NetworkObj\Room</Filter>
     </ClInclude>
+    <ClInclude Include="..\Public\RuntimeTrace.h">
+      <Filter>94.Debugging</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="90.Base">
@@ -144,6 +147,9 @@
     <Filter Include="02.NetworkObj\Room">
       <UniqueIdentifier>{badf670f-35ea-408d-afd7-165b1d2e93b1}</UniqueIdentifier>
     </Filter>
+    <Filter Include="94.Debugging">
+      <UniqueIdentifier>{8432f707-b057-4a92-8cdb-7f0077165cd1}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Private\UCoreBase.cpp">
@@ -199,6 +205,9 @@
     </ClCompile>
     <ClCompile Include="..\Private\URoom.cpp">
       <Filter>02.NetworkObj\Room</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\RuntimeTrace.cpp">
+      <Filter>94.Debugging</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

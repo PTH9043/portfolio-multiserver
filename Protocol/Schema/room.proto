@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+// 기본 방의 인원 정보. 천 명 규모를 위해 입장·퇴장은 개별 알림 대신 인원 수만 알리고,
+// 참가자 목록은 클라이언트가 볼 때만 쪽 단위로 요청한다.
+package multiplayer.protocol;
+option csharp_namespace = "Multiplayer.Protocol";
+
+// SC_ROOM_USER_COUNT: 인원이 바뀔 때 방 전체에 보낸다.
+message SCRoomUserCount {
+  uint32 count = 1;
+}
+
+// CS_ROOM_USERS: 참가자 목록의 offset 번째부터 한 쪽을 요청한다.
+message CSRoomUsers {
+  uint32 offset = 1;
+}
+
+// SC_ROOM_USERS: 요청한 위치부터 최대 20명(서버 상수)의 닉네임을 돌려준다.
+// 쪽을 받는 사이에 사람이 오가면 한 명이 빠지거나 겹칠 수 있다(사용자 선택: offset 방식).
+message SCRoomUsers {
+  uint32 offset = 1;
+  uint32 total = 2;  // 응답 시점의 전체 인원
+  repeated string nicknames = 3;
+}

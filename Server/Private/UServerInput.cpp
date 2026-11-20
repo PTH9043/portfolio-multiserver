@@ -14,6 +14,9 @@
 #include <unistd.h>
 #endif
 
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Server/Private/UServerInput.cpp"
+
 SPACE_H(Server)
 
 namespace {
@@ -43,6 +46,7 @@ struct UServerInput::FImpl {
 
 UServerInput::UServerInput() : _Impl(new FImpl{})
 {
+	RUNTIME_TRACE_EVENT(Create, UServerInput, UServerInput, _RuntimeTraceID.Get());
 #ifdef _WIN32
 	_Impl->StopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 	if (!_Impl->StopEvent)
@@ -56,6 +60,7 @@ UServerInput::UServerInput() : _Impl(new FImpl{})
 
 UServerInput::~UServerInput()
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, ~UServerInput, _RuntimeTraceID.Get());
 #ifdef _WIN32
 	if (_Impl->StopEvent)
 		CloseHandle(_Impl->StopEvent);
@@ -63,6 +68,7 @@ UServerInput::~UServerInput()
 	if (_Impl->StopFd != -1)
 		close(_Impl->StopFd);
 #endif
+	RUNTIME_TRACE_EVENT(Destroy, UServerInput, ~UServerInput, _RuntimeTraceID.Get());
 }
 
 bool UServerInput::IsReady() const noexcept
@@ -76,6 +82,7 @@ bool UServerInput::IsReady() const noexcept
 
 UServerInput::EResult UServerInput::Wait() noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, Wait, _RuntimeTraceID.Get());
 	if (!IsReady()) return EResult::Error;
 	_Impl->LastError.clear();
 #ifdef _WIN32
@@ -102,6 +109,7 @@ UServerInput::EResult UServerInput::Wait() noexcept
 
 bool UServerInput::RequestStop() noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, RequestStop, _RuntimeTraceID.Get());
 	if (!IsReady()) return false;
 #ifdef _WIN32
 	return SetEvent(_Impl->StopEvent) != 0;
@@ -117,6 +125,7 @@ Core::ERROR_CODE UServerInput::GetLastError() const noexcept { return _Impl->Las
 
 UServerInput::EResult UServerInput::Fail(const Core::ERROR_CODE error) noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, Fail, _RuntimeTraceID.Get());
 	_Impl->LastError = error;
 	return EResult::Error;
 }
@@ -124,6 +133,7 @@ UServerInput::EResult UServerInput::Fail(const Core::ERROR_CODE error) noexcept
 #ifdef _WIN32
 UServerInput::EResult UServerInput::WaitConsole(void* input) noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, WaitConsole, _RuntimeTraceID.Get());
 	for (;;) {
 		HANDLE handles[] = { _Impl->StopEvent, input };
 		DWORD wait = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
@@ -142,6 +152,7 @@ UServerInput::EResult UServerInput::WaitConsole(void* input) noexcept
 
 UServerInput::EResult UServerInput::WaitRedirected(void* input, unsigned long type) noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, WaitRedirected, _RuntimeTraceID.Get());
 	for (;;) {
 		DWORD stop = WaitForSingleObject(_Impl->StopEvent, 0);
 		if (stop == WAIT_OBJECT_0) return EResult::StopRequested;
@@ -173,6 +184,7 @@ UServerInput::EResult UServerInput::WaitRedirected(void* input, unsigned long ty
 #else
 UServerInput::EResult UServerInput::WaitUnix() noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerInput, WaitUnix, _RuntimeTraceID.Get());
 	for (;;) {
 		pollfd fds[] = { { _Impl->StopFd, POLLIN, 0 }, { STDIN_FILENO, POLLIN, 0 } };
 		int result = poll(fds, 2, -1);

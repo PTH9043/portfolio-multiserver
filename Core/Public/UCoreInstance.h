@@ -9,6 +9,13 @@ class ULogger;
 
 class CORE_DLL UCoreInstance final : public UCoreBase {
 public:
+    UCoreInstance();
+    ~UCoreInstance() override;
+    UCoreInstance(const UCoreInstance&) = default;
+    UCoreInstance& operator=(const UCoreInstance&) = default;
+    UCoreInstance(UCoreInstance&&) = default;
+    UCoreInstance& operator=(UCoreInstance&&) = default;
+
     // 제어 스레드에서 한 번 호출하고, 완료된 뒤 다른 스레드에 공개한다.
     // 이미 초기화한 경우 false를 반환한다. 객체 생성 예외는 호출자에게 전달한다.
     bool Initialize();
@@ -18,9 +25,18 @@ public:
     bool RegisterWorkerThread(const uint32 threadNum, FUNC<void(EXPECTION_PTR)> onFailure, FUNC<void()> onComplete);
 
     // 초기화 전에는 빈 포인터다. 초기화와 동시에 호출하면 안 된다.
-    SHPTR<UThreadManager> GetThreadManager() const noexcept { return _ThreadManager; }
-    SHPTR<UNetworkManager> GetNetworkManager() const noexcept { return _NetworkManager; }
-    SHPTR<ULogger> GetLogger() const noexcept { return _Logger; }
+    SHPTR<UThreadManager> GetThreadManager() const noexcept {
+        FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UCoreInstance", "GetThreadManager", "Core/Public/UCoreInstance.h", static_cast<Core::uint32>(__LINE__)}};
+        return _ThreadManager;
+    }
+    SHPTR<UNetworkManager> GetNetworkManager() const noexcept {
+        FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UCoreInstance", "GetNetworkManager", "Core/Public/UCoreInstance.h", static_cast<Core::uint32>(__LINE__)}};
+        return _NetworkManager;
+    }
+    SHPTR<ULogger> GetLogger() const noexcept {
+        FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UCoreInstance", "GetLogger", "Core/Public/UCoreInstance.h", static_cast<Core::uint32>(__LINE__)}};
+        return _Logger;
+    }
 
 private:
     SHPTR<UNetworkManager> _NetworkManager;

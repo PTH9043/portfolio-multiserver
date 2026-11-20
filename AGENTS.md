@@ -14,7 +14,7 @@
 **이 파일은 자동으로 읽히지 않을 수 있다.** Git 루트는 이 폴더지만(2026-11-15 도입) `D:\__job`에는 없다. Codex를 `D:\__job`에서 시작하면 그 폴더의 `AGENTS.md`만 자동으로 읽는다. 2026-11-14 확인한 MultiServer 작업 세션은 모두 `D:\__job`에서 시작했다. MultiServer 코드를 다루는 작업이면 시작할 때 이 파일 전체를 도구로 직접 연다.
 
 ### 0-1. 고치기 전에
-1. 프레임워크의 기반 파일을 읽는다. `CoreDefine.h`, `CoreTypes.h`, `CoreStlTypes.h`, `CoreMacro.h`, `UCoreBase`·`UObject`·`UCoreInstance`가 그 대상이다. 작업 대상과 연결된 클래스도 읽는다(`UThreadManager`, `UNetworkManager`, `ULogger`, `FWorkerLogChannel`, `UListener`, `USession`, `ServerApp`).
+1. 프레임워크의 기반 파일을 읽는다. `CoreDefine.h`, `CoreTypes.h`, `CoreStlTypes.h`, `CoreMacro.h`, `UCoreBase`·`UObject`·`UCoreInstance`가 그 대상이다. 작업 대상과 연결된 클래스도 읽는다(`UThreadManager`, `UNetworkManager`, `ULogger`, `FWorkerLogChannel`, `UListener`, `USession`, `ServerApp`, `UServerListener`, `UServerSession`).
 2. 바꿀 함수의 호출 경로를 양쪽으로 따라간다. 그 함수를 누가 부르는지, 그 함수가 무엇을 부르는지 본다.
 3. 같은 일을 이미 하는 함수·별칭·로그 경로·오류 전달 경로가 있는지 검색해서 찾는다. 사용자가 `GraduateProject`(`D:/__job/Project/GraduateProject/ServerFramework`) 같은 기존 구조를 언급하면 새 설계보다 먼저 그 코드를 읽는다.
 4. 수정 전에 다음을 짧게 밝힌다: 대상 클래스의 책임, 재사용할 기존 기능, 바꿀 파일·함수, 이번에 하지 않을 일. 작은 수정이면 한두 줄로 충분하다.
@@ -48,6 +48,14 @@
 - 네트워크 타입도 `GraduateProject`에서 같은 타입에 사용한 공통 별칭을 따른다. `TCPSOCKET`과 `TCPACCEPTOR`를 사용한다. TCP endpoint의 별칭은 사용자가 정한 `TCP_ENDPOINT`를 사용한다. (2026-11-13)
 - `UListener`는 추상 클래스다. 기존 `OnAccept()`는 공통 수락 완료 처리로 유지하며, 성공한 소켓은 사용자가 선택한 protected 순수 가상 함수 `HandleAcceptedSocket`에 넘긴다. 소켓은 기존 성공 콜백과 마찬가지로 `TCPSOCKET` 값으로 전달한다. 멤버 변수는 private으로 유지한다. 기존 실패 콜백은 유지했으며 장기 오류 전달 방식은 별도로 논의한다. (2026-11-13) 주 오류를 전달한 뒤 정리 단계에서 다시 난 close·Stop 오류도 버리지 않고, 공용 함수 `ULogger::TryLogError`로 기록한다. `USession::Close`도 같은 함수를 쓴다. (2026-11-14 사용자 선택: "공용 함수로 Logger 기록")
 - class의 멤버 변수는 public으로 선언하지 않는다. (2026-11-10)
+- 서버 접속 구조(2026-11-16 사용자 선택): `ServerApp <네트워크 워커 수> <포트>`로 실행하고 리스너는 `127.0.0.1`에서 연다. `UServerListener`가 수락한 소켓마다 공통 세션 `UServerSession` 하나를 만든다. 리스너의 accept 실패는 Error로 기록하고 네트워크 실패로 서버를 종료한다. 정해지지 않은 패킷은 Warning으로 기록하고 그 연결을 닫는다.
+- 게임 사물 계층(2026-11-16 사용자 선택, 아직 구현하지 않음): `UObject → UActor(세상의 모든 것, 그려지지 않는 것 포함) → UPawn(그려지지만 움직일 수 없는 사물) → UCharacter(움직일 수 있는 사물) → UPlayer(플레이어가 조종하는 사물)`. `UActor`·`UPawn`·`UCharacter`는 Core, `UPlayer`는 Server에 둔다. 사물과 연결은 상속으로 묶지 않고 분리한다. 연결이 필요한 액터(플레이어, 몬스터 AI)가 세션을 가지며, 세션은 로그인 패킷을 받을 때 액터와 연결한다. 이 계층은 로그인 패킷을 정하는 단계에서 만든다.
+- 패킷 형식(2026-11-19 사용자 선택): 머리말 `FPacketHeader` 뒤 본문은 Protocol Buffers로 직렬화한다. 패킷 번호는 `.proto` enum으로 두고 방향별로 `ECSPacket`(클라→서버)·`ESCPacket`(서버→클라)로 나누며 0은 `CS_NONE`·`SC_NONE`으로 비워 둔다. 값은 `CS_LOGIN`·`SC_LOGIN_RESULT`, 메시지는 `CSLogin`·`SCLoginResult`처럼 짓는다. 파일은 번호 파일과 영역별 메시지 파일(`login`·`room`·`chat`)로 나눈다. Core는 protobuf를 모른다. 해석은 `UServerSession`이, 직렬화는 Server가 하고 바이트를 `USession::Send`에 넘긴다. 보낼 때는 `ByteSizeLong()`이 `PACKET_MAX_BODY_SIZE`를 넘으면 보내지 않고 Warning으로 기록하며, 넘지 않으면 고정 배열에 `SerializeToArray`한다. 해석 실패나 서버가 받을 수 없는 번호는 정해지지 않은 패킷과 같이 Warning 후 그 연결을 닫는다.
+- 첫 채팅 범위(2026-11-19 사용자 선택, 아직 구현하지 않음): 로그인 때 닉네임을 가질 `UPlayer`가 필요하므로 위 사물 계층을 채팅에 필요한 최소 내용으로 함께 만든다. 기본 방 하나(정원 1,000명)를 두고 로그인에 성공하면 자동으로 입장한다. 천 명 규모를 위해 처음 정한 '입장·퇴장 개별 알림과 로그인 결과의 전체 인원 목록'을 다시 판단해 바꿨다. 패킷은 `CS_LOGIN`·`CS_CHAT`·`CS_ROOM_USERS`, `SC_LOGIN_RESULT`·`SC_CHAT`·`SC_ROOM_USER_COUNT`·`SC_ROOM_USERS`다. 로그인 결과는 실패 이유를 담은 결과 enum과 현재 인원 수이며, 이미 쓰는 닉네임은 거절한다. 입장·퇴장은 인원 수 변화만 방 전체에 알린다. 참가자 목록은 클라이언트가 볼 때만 offset으로 한 쪽(최대 20명)씩 요청하며, 그 사이 사람이 오가면 빠지거나 겹칠 수 있다. 닉네임은 2~12자의 한글·영문·숫자만 허용한다. 채팅 본문은 200자까지이며 넘으면 Warning으로 기록하고 전달하지 않는다(연결 유지). 패킷 하나의 최대 크기는 한도 상수와 컴파일 시 검사로 `PACKET_MAX_BODY_SIZE` 안에 들게 보장한다.
+- 패킷 받기(2026-11-20 사용자 선택): 처리 함수를 패킷마다 만들지 않고 공용 `UServerSession::HandlePacket<TPacket>` 하나로 통일한다("Handle이 왜 이렇게 많아, 공용으로 쓸 수 있는 Handle로 통일하고 그다음에 세분화할지 결정하자"). `ProcessingData`의 switch는 번호마다 메시지 타입만 고르고, 해석 실패와 받지 않는 번호는 `RejectPacket`이 Warning 후 연결을 닫는다. protobuf 이름은 `UServerSession.cpp` 안에서만 `namespace Protocol = multiplayer::protocol;`로 줄여 쓴다.
+- 로그의 적정선(2026-11-20 사용자 질문: "너무 많은 로그를 수집하려는거 아니야? 그 선을 잘 타야할것 같은데"): 운영자가 그 줄을 보고 할 일이 있는 것만 남긴다. 정상 흐름(패킷 수신 등)은 기록하지 않고 거절·실패만 남긴다. 지금 `HandlePacket`의 Info 기록은 임시이며 로그인·채팅 처리를 붙일 때 지운다. protobuf 내부(absl)의 stderr 출력은 우리 Warning과 중복이라 `Main.cpp`에서 `absl::InitializeLog()` 후 기준을 FATAL로 올려 끈다.
+- 컨테이너 멤버 변수에 `_Sessions`처럼 복수형만 붙인 이름을 쓰지 않는다. `_SessionContainer`, `_SessionList`처럼 무엇을 담는 컨테이너인지 드러나게 짓는다. 같은 대상을 담는 기존 이름(`URoom::_SessionContainer`)이 있으면 그 이름에 맞춘다. (2026-11-16 사용자 직접 지시: "이런 코딩은 금지해 _Sessions라는 이름은 직관적이지 않아 -> 이런건 SessionContainer나 아니면 SessionList 같은걸로")
+- 함수 이름은 결과의 보장 수준을 드러낸다. `Request…`는 요청만 하고 결과를 보장하지 않는 함수에 쓴다. 부르면 반드시 그 결과에 이르는 함수(예: 실패해도 강제로 끝내는 네트워크 종료 `UNetworkManager::Shutdown`)에는 `Request`를 붙이지 않는다. (2026-11-16 사용자 지시: "RequestStop은 요청한다잖아 부르면 꺼지면 강제로 꺼진다고 해야지")
 - CPP에서 클래스 멤버 함수를 정의할 때 헤더에 선언된 순서를 따른다. (2026-11-12)
 - 일반 `std::mutex` 사용을 금지한다. 동기화에는 프로젝트의 `SHARED_MUTEX`를 사용한다. 공유 상태를 읽기만 하고 동시 읽기가 안전한 구간은 `SHARED_LOCK_GUARD`를 사용하고, 상태 변경과 배타 처리가 필요한 구간은 `EXCLUSIVE_LOCK_GUARD`로 보호한다. (2026-11-11 원문: "읽기만 되는거면 READLOCK만 걸어 그냥 쌩 MUTEX는 전면 금지야")
 - Core 객체와 매니저는 `UCoreBase` 계열을 상속하고, 매니저(`UThreadManager`, `UNetworkManager`, `ULogger`)는 `UCoreInstance`가 소유하며 매니저 기능은 `UCoreInstance`를 거쳐 사용하는 방향을 따른다(예: `RegisterWorkerThread`). 사용자는 2026-11-14에 `UNonCopyableObject`·`UCopyableObject` 중간 계층을 제거했다. 현재 `UThreadManager`·`UNetworkManager`·`ULogger`·`UListener`·`USession`은 `UObject`를 직접 상속하고, `UCoreInstance`와 `UJobQueue`는 `UCoreBase`를 직접 상속한다. `UObject`는 생성 시 받은 `UCoreInstance`를 `WKPTR`로 보관한다. `UObject` 자체에는 `NO_COPY`가 없으며, 복사·이동 가능 여부는 각 파생 클래스의 선언과 멤버를 확인한다.
@@ -67,7 +75,7 @@
 - 외부 라이브러리 객체가 동시 접근을 보장하지 않는 경우에는 읽기 함수라도 필요한 배타 잠금을 유지하고 이유를 주석으로 설명한다(예: Boost 수락기의 `local_endpoint`). (`SHARED_MUTEX` 전환, 2026-11-13)
 - 조건 변수 대기에는 `COND_VARIABLE`(`condition_variable_any`)과 `std::unique_lock<SHARED_MUTEX>`를 사용한다. `EXCLUSIVE_LOCK_GUARD`는 `std::lock_guard`라 대기 중 잠금을 풀 수 없으므로 이 용도에 쓰지 못한다. 이 `std::unique_lock`은 대응하는 별칭이 없어 직접 표기를 허용한다. (`SHARED_MUTEX` 전환, 2026-11-13)
 - 오류를 조용히 버리지 않고 로그로 남긴다. Logger를 거치지 않는 `std::cerr`·`std::cout` 우회 출력을 넣지 않는다. (2026-11-14 원문: "이건 왜 무시해 로그로 출력해야지", "Logger우리 열심히 했잖아 이건 뭐야? 이게 구조대로 맞아?")
-  - AI가 정한 세부 기준(사용자 확인 전): 로그 스레드가 아직 돌지 않거나 종료 단계라 Logger 출력이 보장되지 않는 곳(`UServerApp::Start`·`RegisterWorkers`·`Stop`, `Main.cpp`의 종료 보고)만 콘솔에 직접 쓰고, 그 이유를 주석으로 남긴다.
+  - AI가 정한 세부 기준(사용자 확인 전): 로그 스레드가 아직 돌지 않거나 종료 단계라 Logger 출력이 보장되지 않는 곳(`UServerApp::Start`·`RegisterWorkers`·`Stop`, `Main.cpp`의 종료 보고, 프로세스가 곧 끝나는 `UThreadManager`의 종료 처리기)만 콘솔에 직접 쓰고, 그 이유를 주석으로 남긴다.
 - Logger에 오류가 생기면 멈추게 하고, `try`를 필요한 곳에만 쓴다. (2026-11-14 원문: "Logger에 에러가 생기면 멈추도록 해 야 코드가 너무 이상하잖아 try를 몇번 쓰는거야 적당히 해야지")
   - AI가 정한 세부 기준(사용자 확인 전): `try`/`catch`는 실제로 예외가 날 수 있는 호출(할당, `ASIO::post`·`async_*` 등록, 사용자 콜백, 스레드 생성)만 감싼다. MSVC의 `SHARED_MUTEX` 잠금·해제는 `noexcept`이므로 잠금만 하는 구간에는 두지 않는다. Logger 내부 오류는 접수를 멈추고 실패 콜백으로 종료를 요청한다. Logger의 실패 콜백(`Start`)은 예외를 던지지 않아야 한다. `Start`의 실패 콜백이 던지면 `noexcept` 경계에서 프로그램이 종료된다(2026-11-14 리팩토링 전에는 이 예외를 버렸다).
   - 현재 코드의 동작(2026-11-14 ULogger 정리): `post()` 실패도 Logger를 멈춘다. 그래서 `post()` 실패 뒤에도 Logger가 계속 돌던 때(2026-11-12 사용자가 고른 AI 제안)를 위해 둔 250ms 보조 수거 타이머와 `post()` 실패 횟수(`GetPostFailureCount`, `GetLoggerPostFailureCount`)는 할 일이 없어져 지웠다. 로그 수거는 `TryLog`마다 게시하는 수거 작업, 워커 채널 알림, 100ms 타이머 두 개(공용 묶음의 `_BatchTimer`, 채널 마감의 `_WorkerTimer`), 종료 때 `RunWorker`의 마지막 수거로 이뤄진다. `post()` 실패 뒤에도 Logger가 계속 도는 정책으로 되돌리면 보조 수거가 다시 필요하다.
@@ -139,8 +147,8 @@
 
 - 공개 함수 위에 한국어 주석으로 **호출 스레드**(제어 스레드·워커), **호출 시점**(Start 전, 종료 후), **수명 조건**, **반환값의 의미**(예: "true는 큐 접수 성공이며 출력 성공이 아니다"), **예외 전달 여부**를 적는다. 구현 주석은 동작보다 이유를 설명한다.
 - 성공 여부는 `bool`로 반환한다. 시스템 오류는 `BOOST_ERROR_CODE& error` 같은 출력 매개변수로 돌려주고, 함수 안에서 값을 바꾸는 참조 매개변수에는 `REF_OUT`을 붙일 수 있다.
-- 실패 보고·알림·종료 요청 함수는 대부분 `noexcept`다(`RequestStop`, `ReportFailure`, `UListener::Stop`, `UNetworkManager::ReleaseWork`). `UServerApp::Stop`, `UThreadManager::JoinAll`은 아니다.
-- 네트워크 워커의 예외는 `UNetworkManager::RunWorker`가 `EXPECTION_PTR` 콜백으로 전달한다. `UThreadManager`의 스레드 함수는 아직 예외를 잡아 버리며, 전달 경로는 연결되지 않았다.
+- 실패 보고·알림·종료 요청 함수는 대부분 `noexcept`다(`RequestStop`, `ReportFailure`, `UListener::Stop`, `UNetworkManager::Shutdown`). `UServerApp::Stop`, `UThreadManager::JoinAll`은 아니다.
+- 네트워크 워커의 예외는 `UNetworkManager::RunWorker`가 `EXPECTION_PTR` 콜백으로 전달한다. `UThreadManager`에 등록하는 함수는 오류를 자기 경로로 전달하고 예외를 밖으로 내보내지 않는다. 내보내면 `UThreadManager`가 각 스레드에 설정한 종료 처리기가 예외 내용을 stderr에 남기고 `abort`한다. MSVC의 `std::set_terminate`는 스레드마다 따로 적용되므로 스레드 안에서 설정한다. (2026-11-16 사용자 선택: "catch를 제거하지만 예외는 알 수 있게 한다")
 - 조건 실패 시 바로 반환한다(`RETURN_INVALID_COND`, `if (...) return false;`). 메모리 풀 코드(`CustomMemory.h`)와 `IMPLEMENT_INSTANCE`는 `nullptr == ptr`, `0 != value`처럼 상수를 왼쪽에 두고 비교하지만, 다른 코드에는 `!ptr`, `if (_Instance)` 형태도 섞여 있다.
 
 ### 동기화 구현
@@ -193,7 +201,7 @@ Claude·Codex 등 AI가 이 솔루션에서 코드를 다룰 때 지킨다.
 
 - 변경 내용과 검증 결과는 `로그_설계_자료/로그_설계_기록.pdf` 끝에 한 쪽을 추가해 남긴다. 기존 쪽은 고치지 않는다. 이 기록 방식은 사용자가 결과를 추적하는 기존 관례다.
 - 보고할 때는 사용자의 선택, AI의 제안, 현재 코드의 동작, 시험하지 않은 범위를 구분한다. 지시를 놓쳤거나 잘못 판단했으면 숨기지 않고 무엇을 놓쳤는지 밝힌다.
-- Windows 명령은 CMD 또는 Git Bash로 실행한다. PowerShell은 직접·간접 모두 사용하지 않는다(사용자 공용 지시).
+- Windows 명령은 CMD 또는 Git Bash로 실행한다. Codex·Claude 등 CMD/Git Bash를 선택할 수 있는 실행기는 PowerShell을 직접·간접 모두 사용하지 않는다(사용자 공용 지시). 단, 내장 셸이 PowerShell로 고정된 실행기(Antigravity/Gemini)에 한해 PowerShell 고유 문법·`.ps1` 없이 `cmd /c`·`python`·`git` 호출 용도로만 예외 허용한다(2026-11-20 사용자 정정).
 
 ### Git
 

@@ -7,12 +7,12 @@
 
 - Core의 Boost 헤더는 `ThirdParty/boost_1_92_0`에 보관한 Boost 1.92.0을 사용합니다. Core와 Server의 `BoostIncludeDir` 빌드 속성으로 다른 Boost 헤더 경로를 지정할 수 있습니다. 이 폴더에는 공식 배포본의 헤더와 라이선스가 있으며 빌드된 Boost 라이브러리는 포함하지 않습니다.
 - `Update_Core_Server.bat`을 실행하면 Core와 Server를 Debug x64로 빌드하고, Server 실행 폴더의 Core DLL이 빌드된 DLL과 같은지 검사합니다. 기존 Visual Studio 솔루션 빌드도 Core 프로젝트 참조와 DLL 복사를 수행합니다. Release는 명령 프롬프트에서 `.\Update_Core_Server.bat Release`로 실행합니다.
-- 패킷 메시지는 `Protocol/Schema/packets.proto`에서 추가하거나 같은 폴더 아래 `.proto` 파일을 새로 만듭니다. 현재 `EchoTest`는 생성·직렬화 확인용이며 실제 게임 패킷 번호가 아닙니다. 필드 번호는 메시지 내에서 고유해야 하며 사용했던 번호의 재사용은 피하세요.
+- 패킷 번호는 `Protocol/Schema/packet_type.proto`의 `ECSPacket`(클라→서버)·`ESCPacket`(서버→클라)에, 메시지는 영역별 파일(`login.proto`·`chat.proto`·`room.proto`)에 둡니다. 번호 0은 비워 두고, 사용했던 패킷 번호와 필드 번호는 다시 쓰지 마세요.
 - `Build_Protocol.bat`을 실행하면 `.proto` 전체에서 C++(`Protocol/Generated/Cpp`)과 C#(`Protocol/Generated/CSharp`) 코드를 만들고 C++ `GameProtocol.lib`를 Debug x64로 빌드합니다. Release는 명령 프롬프트에서 `.\Build_Protocol.bat Release`입니다. 생성 폴더는 자동 생성 전용이므로 직접 수정하지 말고 `.proto`를 수정한 뒤 다시 실행하세요. Windows용 `protoc`의 경로 처리 때문에 `.proto` 파일과 하위 폴더 이름은 영문·숫자·밑줄을 사용하세요.
-- C++ 서버는 `#include "packets.pb.h"`로 생성된 메시지에 접근하며, 프로토콜 빌드가 완료된 같은 구성의 라이브러리를 사용합니다. C# 클라이언트는 `Google.Protobuf` 패키지와 생성된 C# 코드를 참조합니다. 생성 코드를 바꾼 뒤 각 프로젝트를 다시 빌드하세요.
+- C++ 서버는 `#include "login.pb.h"`처럼 영역별 생성 헤더로 메시지에 접근하며, 프로토콜 빌드가 완료된 같은 구성의 라이브러리를 사용합니다. C# 클라이언트는 `Google.Protobuf` 패키지와 생성된 C# 코드를 참조합니다. 생성 코드를 바꾼 뒤 각 프로젝트를 다시 빌드하세요.
 - `.proto`를 수정한 뒤에는 사용하려는 구성(Debug 또는 Release)으로 `Build_Protocol.bat`을 다시 실행하세요. 새 정의에 비해 프로토콜 빌드가 오래된 경우 Server와 GameClient2D 빌드는 재생성을 안내하고 멈춥니다. 구성별로 각각 다시 빌드해야 합니다.
 - 첫 실행에는 Git, Visual Studio의 C++ 도구와 CMake, Python, 인터넷이 필요합니다. `Protocol/vendor`와 `Protocol/build`는 소스 의존성과 빌드 결과를 보관합니다. 생성기는 공식 Google.Protobuf.Tools 3.33.6, C++ 런타임은 protobuf v33.6 소스를 사용합니다. 다른 버전으로 따로 교체하지 마세요.
-- protobuf는 메시지의 직렬화 형식입니다. TCP 메시지 경계, 기존 4바이트 헤더의 `size` 의미, 실제 패킷 종류 번호와 전송·수신 처리는 아직 정하거나 구현하지 않았습니다.
+- protobuf는 본문의 직렬화 형식입니다. TCP 메시지 경계는 기존 4바이트 머리말(`type`=패킷 번호, `size`=본문 크기)로 나눕니다. 서버의 패킷 해석·송신 처리는 아직 구현하지 않았습니다(결정 사항은 `AGENTS.md` 1-1절).
 
 태현님이 AI에 질문하며 직접 구현하는 실제 프로젝트입니다. 1주일 동안 작은 2D 총게임을 목표로 만들고, 이후 3주 동안 3D 클라이언트로 확장합니다. 일정은 목표이며 미완료 항목은 기록합니다.
 
@@ -108,4 +108,4 @@ Tests\.build\ListenerContracts\Debug\bin\ListenerContracts.exe
 
 Release 시험은 두 명령의 Debug를 Release로 바꿉니다. 시험 프로젝트는 Core 소스를 실행 파일에 직접 컴파일하며, 로컬 접속·포트 충돌·종료 경합·콜백 예외를 확인합니다. 시험 포트는 별도 수락기로 빈 포트를 확인한 후 사용하므로, 확인과 리스너의 바인딩 사이에 다른 프로세스가 그 포트를 선점할 가능성은 있습니다.
 
-`Stop()`은 이미 전달 대상으로 확정되었거나 실행 중인 파생 함수와 실패 콜백이 끝날 때까지 기다리지 않습니다. 호출자는 이들이 참조하는 객체와 io_context를 관련 완료 핸들러 및 워커 종료까지 유지해야 합니다. Start()는 워커 실행 전 제어 스레드에서 호출합니다. 시작에 성공한 리스너 객체는 재시작하지 않습니다. 현재 `ServerApp`에는 리스너가 연결되지 않았으며 서버 실행만으로 접속을 받지 않습니다.
+`Stop()`은 이미 전달 대상으로 확정되었거나 실행 중인 파생 함수와 실패 콜백이 끝날 때까지 기다리지 않습니다. 호출자는 이들이 참조하는 객체와 io_context를 관련 완료 핸들러 및 워커 종료까지 유지해야 합니다. Start()는 워커 실행 전 제어 스레드에서 호출합니다. 시작에 성공한 리스너 객체는 재시작하지 않습니다. `ServerApp`은 `ServerApp <네트워크 워커 수> <포트>`로 실행하며, `127.0.0.1:<포트>`에서 `UServerListener`로 접속을 받습니다. 접속마다 `UServerSession`을 만들어 `UNetworkManager`에 등록하고 수신을 시작합니다. 아직 정해진 패킷이 없어 받은 패킷은 Warning으로 기록하고 그 연결을 닫습니다. accept 오류가 나면 Error로 기록하고 서버를 종료합니다.

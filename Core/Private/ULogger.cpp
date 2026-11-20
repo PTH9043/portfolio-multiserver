@@ -6,6 +6,9 @@
 #include <boost/system/system_error.hpp>
 #include <exception>
 
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Core/Private/ULogger.cpp"
+
 SPACE_H(Core)
 
 ULogger::ULogger(SHPTR<UCoreInstance> coreInstance)
@@ -13,18 +16,23 @@ ULogger::ULogger(SHPTR<UCoreInstance> coreInstance)
     , _WorkGuard{ ASIO::make_work_guard(_LogContext) }
     , _BatchTimer{ _LogContext }
     , _WorkerTimer{ _LogContext }
-{}
+{
+    RUNTIME_TRACE_EVENT(Create, ULogger, ULogger, GetRuntimeTraceID());
+}
 
 ULogger::~ULogger()
 {
+    RUNTIME_TRACE_SCOPE(ULogger, ~ULogger, GetRuntimeTraceID());
     // 소비자와 생산자가 끝난 후 파괴한다. 미시작 채널도 이후 알림을 보내지 않게 닫는다.
     _StopRequested.store(true, std::memory_order_release);
     for (const FChannelRegistration& registration : _WorkerChannels)
         registration.Channel->FinishProducing();
+    RUNTIME_TRACE_EVENT(Destroy, ULogger, ~ULogger, GetRuntimeTraceID());
 }
 
 SHPTR<FWorkerLogChannel> ULogger::RegisterWorkerChannel(uint64 channelID) noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, RegisterWorkerChannel, GetRuntimeTraceID());
     // 등록과 Start는 워커 실행 전 제어 스레드에서 순차적으로 호출한다.
     if (!IsConfigurable())
         return {};
@@ -51,6 +59,7 @@ SHPTR<FWorkerLogChannel> ULogger::RegisterWorkerChannel(uint64 channelID) noexce
 
 bool ULogger::SetWorkerBatchHandler(FUNC<void(const FLogBatch&)> onBatch) noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, SetWorkerBatchHandler, GetRuntimeTraceID());
     if (!IsConfigurable() || !onBatch)
         return false;
     _OnWorkerBatch = std::move(onBatch);
@@ -59,6 +68,7 @@ bool ULogger::SetWorkerBatchHandler(FUNC<void(const FLogBatch&)> onBatch) noexce
 
 bool ULogger::Start(FUNC<void(const LOGBATCH_CONTAINER&)> onBatch, FUNC<void(EXPECTION_PTR)> onFailure)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, Start, GetRuntimeTraceID());
     if (!IsConfigurable() || !onBatch || !onFailure)
         return false;
     if (!_WorkerChannels.empty() && !_OnWorkerBatch)
@@ -80,6 +90,7 @@ bool ULogger::Start(FUNC<void(const LOGBATCH_CONTAINER&)> onBatch, FUNC<void(EXP
 
 bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, TryLog, GetRuntimeTraceID());
     if (!_Accepting.load(std::memory_order_acquire))
         return false;
 
@@ -87,7 +98,11 @@ bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
     try {
         _LogQueue.push(MakeShared<FLogRecord>(level, message));
         accepted = true;
-        ASIO::post(_LogContext, [this] { Collect(); });
+        const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, TryLog, GetRuntimeTraceID());
+        ASIO::post(_LogContext, [this, submission] {
+            RUNTIME_TRACE_CALLBACK(ULogger, TryLog, GetRuntimeTraceID(), submission);
+            Collect();
+        });
     }
     catch (...) {
         StopOnFailure(std::current_exception());
@@ -97,6 +112,7 @@ bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
 
 bool ULogger::TryLogError(const STRINGVIEW where, const BOOST_ERROR_CODE& error) noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, TryLogError, GetRuntimeTraceID());
     // 접수하지 않을 때는 문장을 만들지 않는다.
     if (!_Accepting.load(std::memory_order_acquire))
         return false;
@@ -116,6 +132,7 @@ bool ULogger::TryLogError(const STRINGVIEW where, const BOOST_ERROR_CODE& error)
 void ULogger::RunWorker(void* data) noexcept
 {
     ULogger* logger = static_cast<ULogger*>(data);
+    RUNTIME_TRACE_SCOPE(ULogger, RunWorker, logger->GetRuntimeTraceID());
     try {
         // work guard가 있으므로 run()은 RequestStop이 게시한 작업이 guard를 놓거나, StopOnFailure가 멈추거나,
         // 처리 함수(출력 콜백 포함)의 예외가 빠져나올 때만 끝난다. 예외는 아래 catch가 받는다.
@@ -132,6 +149,7 @@ void ULogger::RunWorker(void* data) noexcept
 
 void ULogger::RequestStop() noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, RequestStop, GetRuntimeTraceID());
     // 호출자는 모든 생산자의 로그 접수가 완료됐음을 보장한다.
     if (_StopRequested.exchange(true, std::memory_order_acq_rel))
         return;
@@ -144,7 +162,9 @@ void ULogger::RequestStop() noexcept
         return;
 
     try {
-        ASIO::post(_LogContext, [this] {
+        const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, RequestStop, GetRuntimeTraceID());
+        ASIO::post(_LogContext, [this, submission] {
+            RUNTIME_TRACE_CALLBACK(ULogger, RequestStop, GetRuntimeTraceID(), submission);
             ++_BatchGeneration;
             _BatchTimer.cancel();
             ++_WorkerTimerGeneration;
@@ -177,10 +197,13 @@ bool ULogger::NotifyWorkerChannel(void* context) noexcept
 
 bool ULogger::ScheduleWorkerCollect() noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, ScheduleWorkerCollect, GetRuntimeTraceID());
     if (_WorkerCollectPending.exchange(true, std::memory_order_acq_rel))
         return true;
     try {
-        ASIO::post(_LogContext, [this] {
+        const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, ScheduleWorkerCollect, GetRuntimeTraceID());
+        ASIO::post(_LogContext, [this, submission] {
+            RUNTIME_TRACE_CALLBACK(ULogger, ScheduleWorkerCollect, GetRuntimeTraceID(), submission);
             const uint64 observed = _WorkerSignalSequence.load(std::memory_order_acquire);
             CollectWorkerChannels(false);
             // store가 아니라 exchange를 쓴다. 생산자의 exchange(true)와 순서가 정해져,
@@ -201,6 +224,7 @@ bool ULogger::ScheduleWorkerCollect() noexcept
 
 void ULogger::CollectWorkerChannels(const bool finalPass)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, CollectWorkerChannels, GetRuntimeTraceID());
     if (!_OnWorkerBatch || _Failed.load(std::memory_order_acquire))
         return;
 
@@ -266,19 +290,23 @@ void ULogger::CollectWorkerChannels(const bool finalPass)
 
 void ULogger::ArmWorkerTimer(const TIMEPOINT_STEADY_CLOCK deadline)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, ArmWorkerTimer, GetRuntimeTraceID());
     if (_WorkerTimerArmed && _WorkerDeadline == deadline)
         return;
     const uint64 generation = ++_WorkerTimerGeneration;
     _WorkerTimer.expires_at(deadline);
     _WorkerDeadline = deadline;
     _WorkerTimerArmed = true;
-    _WorkerTimer.async_wait([this, generation](const BOOST_ERROR_CODE& error) {
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, ArmWorkerTimer, GetRuntimeTraceID());
+    _WorkerTimer.async_wait([this, generation, submission](const BOOST_ERROR_CODE& error) {
+        RUNTIME_TRACE_CALLBACK(ULogger, ArmWorkerTimer, GetRuntimeTraceID(), submission);
         OnWorkerTimer(error, generation);
     });
 }
 
 void ULogger::OnWorkerTimer(const BOOST_ERROR_CODE& error, const uint64 generation)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, OnWorkerTimer, GetRuntimeTraceID());
     // 세대가 다르면 다시 설정되기 전의 대기다.
     if (generation != _WorkerTimerGeneration || error == ASIO::error::operation_aborted)
         return;
@@ -292,15 +320,19 @@ void ULogger::OnWorkerTimer(const BOOST_ERROR_CODE& error, const uint64 generati
 
 void ULogger::ArmBatchTimer()
 {
+    RUNTIME_TRACE_SCOPE(ULogger, ArmBatchTimer, GetRuntimeTraceID());
     const uint64 generation = ++_BatchGeneration;
     _BatchTimer.expires_after(LOG_MAX_BATCH_WAIT);
-    _BatchTimer.async_wait([this, generation](const BOOST_ERROR_CODE& error) {
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, ArmBatchTimer, GetRuntimeTraceID());
+    _BatchTimer.async_wait([this, generation, submission](const BOOST_ERROR_CODE& error) {
+        RUNTIME_TRACE_CALLBACK(ULogger, ArmBatchTimer, GetRuntimeTraceID(), submission);
         OnBatchTimer(error, generation);
     });
 }
 
 void ULogger::OnBatchTimer(const BOOST_ERROR_CODE& error, uint64 generation)
 {
+    RUNTIME_TRACE_SCOPE(ULogger, OnBatchTimer, GetRuntimeTraceID());
     // 세대가 다르면 이미 출력한 묶음의 타이머다.
     if (generation != _BatchGeneration || error == ASIO::error::operation_aborted)
         return;
@@ -313,6 +345,7 @@ void ULogger::OnBatchTimer(const BOOST_ERROR_CODE& error, uint64 generation)
 
 void ULogger::FlushBatch()
 {
+    RUNTIME_TRACE_SCOPE(ULogger, FlushBatch, GetRuntimeTraceID());
     if (_Failed.load(std::memory_order_acquire) || _Batch.empty())
         return;
 
@@ -325,6 +358,7 @@ void ULogger::FlushBatch()
 
 void ULogger::Collect()
 {
+    RUNTIME_TRACE_SCOPE(ULogger, Collect, GetRuntimeTraceID());
     // 묶음은 64건이 되면 바로 출력하므로 여기 들어올 때는 항상 64건보다 적다.
     SHPTR<FLogRecord> record;
     while (!_Failed.load(std::memory_order_acquire) && _LogQueue.try_pop(record)) {
@@ -340,6 +374,7 @@ void ULogger::Collect()
 
 void ULogger::StopOnFailure(EXPECTION_PTR failure) noexcept
 {
+    RUNTIME_TRACE_SCOPE(ULogger, StopOnFailure, GetRuntimeTraceID());
     if (_Failed.exchange(true, std::memory_order_acq_rel))
         return;
     _Accepting.store(false, std::memory_order_release);

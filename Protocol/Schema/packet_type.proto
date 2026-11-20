@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+// FPacketHeader.type 에 들어가는 패킷 번호다. 방향별로 번호를 따로 매긴다.
+// proto3 의 첫 값 0 은 실제 패킷에 쓰지 않는다. 사용했던 번호는 다른 패킷에 다시 쓰지 않는다.
+package multiplayer.protocol;
+option csharp_namespace = "Multiplayer.Protocol";
+
+// 클라이언트 → 서버
+enum ECSPacket {
+  CS_NONE = 0;
+  CS_LOGIN = 1;       // CSLogin
+  CS_CHAT = 2;        // CSChat
+  CS_ROOM_USERS = 3;  // CSRoomUsers
+}
+
+// 서버 → 클라이언트
+enum ESCPacket {
+  SC_NONE = 0;
+  SC_LOGIN_RESULT = 1;     // SCLoginResult
+  SC_CHAT = 2;             // SCChat
+  SC_ROOM_USER_COUNT = 3;  // SCRoomUserCount
+  SC_ROOM_USERS = 4;       // SCRoomUsers
+}

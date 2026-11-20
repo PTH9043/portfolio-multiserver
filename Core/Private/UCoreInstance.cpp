@@ -3,10 +3,23 @@
 #include "UThreadManager.h"
 #include "ULogger.h"
 
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Core/Private/UCoreInstance.cpp"
+
 SPACE_H(Core)
+
+UCoreInstance::UCoreInstance()
+{
+    RUNTIME_TRACE_EVENT(Create, UCoreInstance, UCoreInstance, GetRuntimeTraceID());
+}
+UCoreInstance::~UCoreInstance()
+{
+    RUNTIME_TRACE_EVENT(Destroy, UCoreInstance, ~UCoreInstance, GetRuntimeTraceID());
+}
 
 bool UCoreInstance::Initialize()
 {
+    RUNTIME_TRACE_SCOPE(UCoreInstance, Initialize, GetRuntimeTraceID());
     if (_ThreadManager || _NetworkManager || _Logger)
         return false;
 
@@ -25,6 +38,7 @@ bool UCoreInstance::Initialize()
 
 bool UCoreInstance::RegisterWorkerThread(const uint32 threadNum, FUNC<void(EXPECTION_PTR)> onFailure, FUNC<void()> onComplete)
 {
+    RUNTIME_TRACE_SCOPE(UCoreInstance, RegisterWorkerThread, GetRuntimeTraceID());
     if (!_ThreadManager || !_NetworkManager || !onFailure || !onComplete || threadNum == 0)
         return false;
 

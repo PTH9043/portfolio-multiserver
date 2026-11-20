@@ -1,11 +1,16 @@
 #include "ServerApp.h"
+#include "UServerListener.h"
 #include "UCoreInstance.h"
 #include "UNetworkManager.h"
 #include "UThreadManager.h"
 #include "ULogger.h"
 
+#include <boost/system/system_error.hpp>
 #include <exception>
 #include <stdexcept>
+
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Server/Private/ServerApp.cpp"
 
 SPACE_H(Server)
 
@@ -25,18 +30,26 @@ const char* GetLogLevelName(const ELogLevel level) noexcept
 }
 }
 
+UServerApp::UServerApp()
+{
+	RUNTIME_TRACE_EVENT(Create, UServerApp, UServerApp, _RuntimeTraceID.Get());
+}
+
 UServerApp::~UServerApp()
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, ~UServerApp, _RuntimeTraceID.Get());
 	Stop();
 	// 워커가 남아 있을 수 있으면 워커가 참조하는 객체를 해제하지 않는다.
 	if (_bRunning.load() && _WorkersRegistered)
 		terminate();
 
 	ClearObject();
+	RUNTIME_TRACE_EVENT(Destroy, UServerApp, ~UServerApp, _RuntimeTraceID.Get());
 }
 
-bool UServerApp::Start()
+bool UServerApp::Start(const uint16 port)
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, Start, _RuntimeTraceID.Get());
 	RETURN_INVALID_COND(_bRunning.load(), false);
 
 	try {
@@ -62,6 +75,27 @@ bool UServerApp::Start()
 			ClearObject();
 			return false;
 		}
+
+		// 리스너는 네트워크 워커를 등록하기 전에 시작해야 한다. 지금은 이 PC(127.0.0.1)의 접속만 받는다.
+		const auto networkManager = _CoreInstance->GetNetworkManager();
+		BOOST_ERROR_CODE error;
+		const bool started = networkManager->StartListener(
+			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext()),
+			TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
+			[this](const BOOST_ERROR_CODE& acceptError) {
+				// 리스너는 accept 오류 뒤 새 접속을 받지 않으므로 서버를 끝낸다. 흔한 접속 중단은 Boost가 다시 받는다.
+				const auto logger = _CoreInstance->GetLogger();
+				if (logger)
+					logger->TryLogError("UServerListener accept failed", acceptError);
+				ReportFailure(_NetworkFailed, _NetworkFailure,
+					std::make_exception_ptr(boost::system::system_error{ acceptError, "UServerListener accept failed" }));
+			},
+			error);
+		if (!started) {
+			std::cerr << "Listener start failed on 127.0.0.1:" << port << ": " << error.message() << '\n';
+			ClearObject();
+			return false;
+		}
 	}
 	catch (const std::exception& error) {
 		std::cerr << "CoreInstance initialization failed: " << error.what() << '\n';
@@ -81,6 +115,7 @@ bool UServerApp::Start()
 
 bool UServerApp::RegisterWorkers(uint32 networkWorkerCount)
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, RegisterWorkers, _RuntimeTraceID.Get());
 	if (!_bRunning.load() || _WorkersRegistered || networkWorkerCount == 0)
 		return false;
 
@@ -133,6 +168,7 @@ bool UServerApp::RegisterWorkers(uint32 networkWorkerCount)
 
 bool UServerApp::JoinWorkers()
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, JoinWorkers, _RuntimeTraceID.Get());
 	if (!_bRunning.load() || !_WorkersRegistered)
 		return false;
 
@@ -148,6 +184,7 @@ bool UServerApp::JoinWorkers()
 
 void UServerApp::Stop()
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, Stop, _RuntimeTraceID.Get());
 	RETURN_INVALID_COND(false == _bRunning.load(), );
 
 	RequestStop();
@@ -177,6 +214,7 @@ void UServerApp::Stop()
 
 void UServerApp::RequestStop() noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, RequestStop, _RuntimeTraceID.Get());
 	if (!_bRunning.load(std::memory_order_acquire))
 		return;
 
@@ -186,10 +224,10 @@ void UServerApp::RequestStop() noexcept
 		return;
 
 	EStopState result = EStopState::Requested;
-	// 위의 상태 교환으로 이 함수 본문은 한 번만 실행되므로 work guard 해제도 한 번만 일어난다.
+	// 위의 상태 교환으로 이 함수 본문은 한 번만 실행되므로 네트워크 종료도 한 번만 일어난다.
 	const auto networkManager = _CoreInstance->GetNetworkManager();
 	if (networkManager)
-		networkManager->ReleaseWork();
+		networkManager->Shutdown();
 
 	if (_ServerInput && !_ServerInput->RequestStop())
 		result = EStopState::Failed;
@@ -219,6 +257,7 @@ ERROR_CODE UServerApp::GetInputFailure() const
 void UServerApp::RunInputWorker(void* data) noexcept
 {
 	UServerApp* server = static_cast<UServerApp*>(data);
+	RUNTIME_TRACE_SCOPE(UServerApp, RunInputWorker, server->_RuntimeTraceID.Get());
 	UServerInput& input = *server->_ServerInput;
 	const UServerInput::EResult result = input.Wait();
 	if (result == UServerInput::EResult::Error) {
@@ -234,6 +273,7 @@ void UServerApp::RunInputWorker(void* data) noexcept
 
 void UServerApp::ReportFailure(ATOMIC<bool>& failed, EXPECTION_PTR& storedFailure, EXPECTION_PTR failure) noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, ReportFailure, _RuntimeTraceID.Get());
 	failed.store(true, std::memory_order_release);
 	{
 		// 처음 보고된 원인만 보관한다. 종료 요청은 잠금 밖에서 한다.
@@ -246,6 +286,7 @@ void UServerApp::ReportFailure(ATOMIC<bool>& failed, EXPECTION_PTR& storedFailur
 
 void UServerApp::LogProducerFinished() noexcept
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, LogProducerFinished, _RuntimeTraceID.Get());
 	if (_RemainingLogProducers.fetch_sub(1, std::memory_order_acq_rel) != 1)
 		return;
 	const auto logger = _CoreInstance->GetLogger();
@@ -255,6 +296,7 @@ void UServerApp::LogProducerFinished() noexcept
 
 void UServerApp::ClearObject()
 {
+	RUNTIME_TRACE_SCOPE(UServerApp, ClearObject, _RuntimeTraceID.Get());
 	_ServerInput.reset();
 	_CoreInstance.reset();
 }

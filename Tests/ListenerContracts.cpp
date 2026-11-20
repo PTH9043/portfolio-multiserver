@@ -90,7 +90,7 @@ struct Fixture {
     }
     bool Shutdown() {
         BOOST_ERROR_CODE error; Listener->Stop(error);
-        Manager->ReleaseWork();
+        Manager->Shutdown();
         std::unique_lock<SHARED_MUTEX> lock(Mutex);
         bool exited = Changed.wait_for(lock, 3s, [&] { return Exited == static_cast<int>(Workers.size()); });
         return !error && exited;
@@ -100,7 +100,7 @@ struct Fixture {
         Changed.notify_all();
         BOOST_ERROR_CODE ignored;
         if (Listener) Listener->Stop(ignored);
-        if (Manager) { Manager->ReleaseWork(); Manager->GetIOContext().stop(); }
+        if (Manager) { Manager->Shutdown(); Manager->GetIOContext().stop(); }
         for (auto& worker : Workers) if (worker.joinable()) worker.join();
         Accepted.clear();
     }
@@ -147,7 +147,7 @@ static void TestCallbackDestruction() {
     capture.reset();
     f.Listener->Stop(ec);
     Require(!ec && destroyed.load(), "callback destructor can call listener Stop");
-    f.Manager->ReleaseWork(); f.Manager->GetIOContext().run();
+    f.Manager->Shutdown(); f.Manager->GetIOContext().run();
 }
 
 static void TestStopBeforeWorkers() {
@@ -155,7 +155,7 @@ static void TestStopBeforeWorkers() {
     Require(f.Start(ec), "start before workers");
     f.Listener->Stop(ec); Require(!ec, "stop before workers");
     Require(!f.Start(ec) && ec == ASIO::error::already_started, "successful listener cannot restart");
-    f.Manager->ReleaseWork(); f.Manager->GetIOContext().run();
+    f.Manager->Shutdown(); f.Manager->GetIOContext().run();
     Require(f.Accepted.empty() && f.Failures == 0, "cancel completion before workers");
 }
 
@@ -205,7 +205,7 @@ static void TestListenerLifetimeDuringCallback() {
     Require(!weak.expired(), "listener must live during its callback");
     { EXCLUSIVE_LOCK_GUARD lock(f.Mutex); f.ReleaseCallback=true; }
     f.Changed.notify_all();
-    f.Manager->ReleaseWork();
+    f.Manager->Shutdown();
     { std::unique_lock<SHARED_MUTEX> lock(f.Mutex);
       Require(f.Changed.wait_for(lock,3s,[&]{return f.Exited == static_cast<int>(f.Workers.size());}), "lifetime workers exit"); }
     Require(weak.expired(), "listener released after callback finishes");

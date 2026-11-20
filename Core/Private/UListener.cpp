@@ -3,6 +3,9 @@
 #include "UCoreInstance.h"
 #include "ULogger.h"
 
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Core/Private/UListener.cpp"
+
 SPACE_H(Core)
 
 UListener::UListener(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context)
@@ -14,6 +17,7 @@ UListener::~UListener() = default;
 bool UListener::Start(const TCP_ENDPOINT& endpoint,
     FOnFailure onFailure, BOOST_ERROR_CODE& error)
 {
+    RUNTIME_TRACE_SCOPE(UListener, Start, GetRuntimeTraceID());
     error.clear();
     if (!onFailure || ThisWeak<UListener>().expired()) {
         error = ASIO::error::invalid_argument;
@@ -56,6 +60,7 @@ bool UListener::Start(const TCP_ENDPOINT& endpoint,
 
 void UListener::Stop(BOOST_ERROR_CODE& error) noexcept
 {
+    RUNTIME_TRACE_SCOPE(UListener, Stop, GetRuntimeTraceID());
     error.clear();
     // 핸들러는 잠금 밖에서 해제되도록 잠금 범위 밖의 변수로 옮긴다.
     SHPTR<FHandlers> retired;
@@ -67,17 +72,22 @@ void UListener::Stop(BOOST_ERROR_CODE& error) noexcept
 
 void UListener::BeginAccept()
 {
+    RUNTIME_TRACE_SCOPE(UListener, BeginAccept, GetRuntimeTraceID());
     WKPTR<UListener> weak = ThisWeak<UListener>();
-    _Acceptor.async_accept([weak](const BOOST_ERROR_CODE& error,
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, UListener, BeginAccept, GetRuntimeTraceID());
+    _Acceptor.async_accept([weak, submission](const BOOST_ERROR_CODE& error,
         TCPSOCKET socket) {
-        if (auto listener = weak.lock())
+        if (auto listener = weak.lock()) {
+            RUNTIME_TRACE_CALLBACK(UListener, BeginAccept, listener->GetRuntimeTraceID(), submission);
             listener->OnAccept(error, std::move(socket));
+        }
     });
 }
 
 void UListener::OnAccept(const BOOST_ERROR_CODE& error,
     TCPSOCKET socket)
 {
+    RUNTIME_TRACE_SCOPE(UListener, OnAccept, GetRuntimeTraceID());
     SHPTR<FHandlers> handlers;
     BOOST_ERROR_CODE closeError; // 잠금 안에서 닫고, 기록은 잠금 밖에서 한다.
     {
@@ -124,6 +134,7 @@ void UListener::OnAccept(const BOOST_ERROR_CODE& error,
 
 void UListener::LogCleanupError(const STRINGVIEW where, const BOOST_ERROR_CODE& error) noexcept
 {
+    RUNTIME_TRACE_SCOPE(UListener, LogCleanupError, GetRuntimeTraceID());
     if (!error)
         return;
     const auto coreInstance = GetCoreInstance();

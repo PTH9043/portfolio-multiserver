@@ -2,14 +2,25 @@
 #include "FWorkerLogChannel.h"
 #include <exception>
 
+#include "RuntimeTrace.h"
+#define RUNTIME_TRACE_SOURCE "Core/Private/FWorkerLogChannel.cpp"
+
 SPACE_H(Core)
 
 FWorkerLogChannel::FWorkerLogChannel(const uint64 channelID) noexcept
     : _ChannelID{ channelID }
-{}
+{
+    RUNTIME_TRACE_EVENT(Create, FWorkerLogChannel, FWorkerLogChannel, _RuntimeTraceID.Get());
+}
+
+FWorkerLogChannel::~FWorkerLogChannel()
+{
+    RUNTIME_TRACE_EVENT(Destroy, FWorkerLogChannel, ~FWorkerLogChannel, _RuntimeTraceID.Get());
+}
 
 bool FWorkerLogChannel::SetNotifier(FNotify notify, void* context) noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, SetNotifier, _RuntimeTraceID.Get());
     if (!notify)
         return false;
 
@@ -37,6 +48,7 @@ FWorkerLogChannel::FNotificationState FWorkerLogChannel::GetNotificationState() 
 
 bool FWorkerLogChannel::TryLog(const ELogLevel level, const STRINGVIEW message) noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, TryLog, _RuntimeTraceID.Get());
     if (_Failed.load(std::memory_order_acquire) || message.size() > MaxMessageBytes)
         return false;
 
@@ -65,6 +77,7 @@ bool FWorkerLogChannel::TryLog(const ELogLevel level, const STRINGVIEW message) 
 
 bool FWorkerLogChannel::PublishExpiredBatch(const TIMEPOINT_STEADY_CLOCK now) noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, PublishExpiredBatch, _RuntimeTraceID.Get());
     EXCLUSIVE_LOCK_GUARD lock{ _Mutex };
     const FEntry* entry{ GetWritingEntry() };
     if (!entry)
@@ -77,6 +90,7 @@ bool FWorkerLogChannel::PublishExpiredBatch(const TIMEPOINT_STEADY_CLOCK now) no
 
 void FWorkerLogChannel::FinishProducing() noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, FinishProducing, _RuntimeTraceID.Get());
     FNotify notify{};
     void* notifyContext{};
     {
@@ -92,6 +106,7 @@ void FWorkerLogChannel::FinishProducing() noexcept
 
 const FLogBatch* FWorkerLogChannel::TryBeginOutput() noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, TryBeginOutput, _RuntimeTraceID.Get());
     EXCLUSIVE_LOCK_GUARD lock{ _Mutex };
     if (_Failed.load(std::memory_order_acquire) || _OutputInProgress || _Ready.empty())
         return nullptr;
@@ -102,6 +117,7 @@ const FLogBatch* FWorkerLogChannel::TryBeginOutput() noexcept
 
 bool FWorkerLogChannel::FinishOutput() noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, FinishOutput, _RuntimeTraceID.Get());
     // 처리한 묶음을 옮겨 둘 임시 목록을 만들 때 할당이 일어날 수 있다.
     try {
         std::list<FEntry> retired;
@@ -185,12 +201,14 @@ void FWorkerLogChannel::PrepareNotification(FNotify& notify, void*& context) noe
 
 void FWorkerLogChannel::Notify(FNotify notify, void* context) noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, Notify, _RuntimeTraceID.Get());
     if (notify && !notify(context))
         MarkFailure(nullptr);
 }
 
 void FWorkerLogChannel::MarkFailure(EXPECTION_PTR failure) noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, MarkFailure, _RuntimeTraceID.Get());
     FNotify notify{};
     void* context{};
     {
@@ -215,6 +233,7 @@ const FWorkerLogChannel::FEntry* FWorkerLogChannel::GetWritingEntry() const noex
 
 void FWorkerLogChannel::PublishWritingBatch() noexcept
 {
+    RUNTIME_TRACE_SCOPE(FWorkerLogChannel, PublishWritingBatch, _RuntimeTraceID.Get());
     if (GetWritingEntry())
         _Ready.splice(_Ready.end(), _Writing, _Writing.begin());
 }
