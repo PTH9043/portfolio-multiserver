@@ -61,6 +61,9 @@
     <ClInclude Include="..\Public\UNetworkManager.h">
       <Filter>01.Manager\NetworkManager</Filter>
     </ClInclude>
+    <ClInclude Include="..\Public\URoomManager.h">
+      <Filter>01.Manager\RoomManager</Filter>
+    </ClInclude>
     <ClInclude Include="..\Public\UObject.h">
       <Filter>90.Base\Object</Filter>
     </ClInclude>
@@ -75,6 +78,15 @@
     </ClInclude>
     <ClInclude Include="..\Public\RuntimeTrace.h">
       <Filter>94.Debugging</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UActor.h">
+      <Filter>03.GameObj\Actor</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UPawn.h">
+      <Filter>03.GameObj\Pawn</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UCharacter.h">
+      <Filter>03.GameObj\Character</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -126,6 +138,9 @@
     <Filter Include="01.Manager\NetworkManager">
       <UniqueIdentifier>{566d6da0-04f0-4abb-a9b8-19b6e755cc1c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="01.Manager\RoomManager">
+      <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d05}</UniqueIdentifier>
+    </Filter>
     <Filter Include="95.Interface">
       <UniqueIdentifier>{d9429e8d-12c8-49dc-ae1a-2bb2e6792117}</UniqueIdentifier>
     </Filter>
@@ -149,6 +164,18 @@
     </Filter>
     <Filter Include="94.Debugging">
       <UniqueIdentifier>{8432f707-b057-4a92-8cdb-7f0077165cd1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="03.GameObj">
+      <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="03.GameObj\Actor">
+      <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d02}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="03.GameObj\Pawn">
+      <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d03}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="03.GameObj\Character">
+      <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d04}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -194,6 +221,9 @@
     <ClCompile Include="..\Private\UNetworkManager.cpp">
       <Filter>01.Manager\NetworkManager</Filter>
     </ClCompile>
+    <ClCompile Include="..\Private\URoomManager.cpp">
+      <Filter>01.Manager\RoomManager</Filter>
+    </ClCompile>
     <ClCompile Include="..\Private\UObject.cpp">
       <Filter>90.Base\Object</Filter>
     </ClCompile>
@@ -208,6 +238,15 @@
     </ClCompile>
     <ClCompile Include="..\Private\RuntimeTrace.cpp">
       <Filter>94.Debugging</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UActor.cpp">
+      <Filter>03.GameObj\Actor</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UPawn.cpp">
+      <Filter>03.GameObj\Pawn</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UCharacter.cpp">
+      <Filter>03.GameObj\Character</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

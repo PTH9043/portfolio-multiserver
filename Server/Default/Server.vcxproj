@@ -19,16 +19,21 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\Public\ChatProtocolLimits.h" />
     <ClInclude Include="..\Public\ServerApp.h" />
     <ClInclude Include="..\Public\UServerInput.h" />
     <ClInclude Include="..\Public\UServerListener.h" />
     <ClInclude Include="..\Public\UServerSession.h" />
+    <ClInclude Include="..\Public\UGameRoom.h" />
+    <ClInclude Include="..\Public\UPlayer.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Private\ServerApp.cpp" />
     <ClCompile Include="..\Private\UServerInput.cpp" />
     <ClCompile Include="..\Private\UServerListener.cpp" />
     <ClCompile Include="..\Private\UServerSession.cpp" />
+    <ClCompile Include="..\Private\UGameRoom.cpp" />
+    <ClCompile Include="..\Private\UPlayer.cpp" />
     <ClCompile Include="Main.cpp" />
   </ItemGroup>
   <ItemGroup>

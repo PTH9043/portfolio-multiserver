@@ -11,7 +11,7 @@ SPACE_H(Server)
 
 using namespace Core;
 
-// 서버의 뼈대다. 127.0.0.1의 지정 포트에서 접속을 받는다. 정해진 패킷은 아직 없다.
+// 서버 앱이다. 127.0.0.1의 지정 포트에서 접속을 받아 리스너와 워커를 운영한다.
 class UServerApp final
 {
 public:

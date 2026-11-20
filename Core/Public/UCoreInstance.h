@@ -6,6 +6,7 @@ SPACE_H(Core)
 
 class UThreadManager;
 class ULogger;
+class URoomManager;
 
 class CORE_DLL UCoreInstance final : public UCoreBase {
 public:
@@ -37,10 +38,16 @@ public:
         FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UCoreInstance", "GetLogger", "Core/Public/UCoreInstance.h", static_cast<Core::uint32>(__LINE__)}};
         return _Logger;
     }
+    SHPTR<URoomManager> GetRoomManager() const noexcept {
+        FRuntimeTraceScope runtimeScope{GetRuntimeTraceID(), {"UCoreInstance", "GetRoomManager", "Core/Public/UCoreInstance.h", static_cast<Core::uint32>(__LINE__)}};
+        return _RoomManager;
+    }
 
 private:
     SHPTR<UNetworkManager> _NetworkManager;
     SHPTR<ULogger> _Logger;
+    // 선언 역순으로 소멸하므로 _ThreadManager 종료 뒤, _NetworkManager(_IOContext) 소멸 전에 방들이 정리된다.
+    SHPTR<URoomManager> _RoomManager;
     LIST<FNetworkWorkerData> _NetworkWorkerData;
     // 기본 멤버 소멸 순서에서 스레드 매니저가 먼저 정리된다.
     SHPTR<UThreadManager> _ThreadManager;

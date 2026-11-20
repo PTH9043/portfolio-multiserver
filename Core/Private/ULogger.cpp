@@ -91,6 +91,8 @@ bool ULogger::Start(FUNC<void(const LOGBATCH_CONTAINER&)> onBatch, FUNC<void(EXP
 bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
 {
     RUNTIME_TRACE_SCOPE(ULogger, TryLog, GetRuntimeTraceID());
+    if (level == ELogLevel::Error)
+        TriggerRuntimeTraceDump();
     if (!_Accepting.load(std::memory_order_acquire))
         return false;
 

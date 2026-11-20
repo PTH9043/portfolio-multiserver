@@ -8,6 +8,7 @@
 <ClCompile Include="..\Core\Private\UCoreInstance.cpp" />
 <ClCompile Include="..\Core\Private\UThreadManager.cpp" />
 <ClCompile Include="..\Core\Private\UNetworkManager.cpp" />
+<ClCompile Include="..\Core\Private\URoomManager.cpp" />
 <ClCompile Include="..\Core\Private\UObject.cpp" />
 <ClCompile Include="..\Core\Private\UListener.cpp" />
 <ClCompile Include="..\Core\Private\USession.cpp" />

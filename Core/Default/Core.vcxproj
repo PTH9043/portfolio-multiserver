@@ -40,10 +40,14 @@
     <ClInclude Include="..\Public\UObject.h" />
     <ClInclude Include="..\Public\UThreadManager.h" />
     <ClInclude Include="..\Public\UNetworkManager.h" />
+    <ClInclude Include="..\Public\URoomManager.h" />
     <ClInclude Include="..\Public\UListener.h" />
     <ClInclude Include="..\Public\USession.h" />
     <ClInclude Include="..\Public\URoom.h" />
     <ClInclude Include="..\Public\UJobQueue.h" />
+    <ClInclude Include="..\Public\UActor.h" />
+    <ClInclude Include="..\Public\UPawn.h" />
+    <ClInclude Include="..\Public\UCharacter.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="..\Private\UCoreBase.cpp" />
@@ -61,10 +65,14 @@
     <ClCompile Include="..\Private\UObject.cpp" />
     <ClCompile Include="..\Private\UThreadManager.cpp" />
     <ClCompile Include="..\Private\UNetworkManager.cpp" />
+    <ClCompile Include="..\Private\URoomManager.cpp" />
     <ClCompile Include="..\Private\UListener.cpp" />
     <ClCompile Include="..\Private\USession.cpp" />
     <ClCompile Include="..\Private\URoom.cpp" />
     <ClCompile Include="..\Private\UJobQueue.cpp" />
+    <ClCompile Include="..\Private\UActor.cpp" />
+    <ClCompile Include="..\Private\UPawn.cpp" />
+    <ClCompile Include="..\Private\UCharacter.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>

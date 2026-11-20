@@ -1,7 +1,10 @@
 #include "ServerApp.h"
+#include "ChatProtocolLimits.h"
+#include "UGameRoom.h"
 #include "UServerListener.h"
 #include "UCoreInstance.h"
 #include "UNetworkManager.h"
+#include "URoomManager.h"
 #include "UThreadManager.h"
 #include "ULogger.h"
 
@@ -76,8 +79,26 @@ bool UServerApp::Start(const uint16 port)
 			return false;
 		}
 
-		// 리스너는 네트워크 워커를 등록하기 전에 시작해야 한다. 지금은 이 PC(127.0.0.1)의 접속만 받는다.
+		// 기본 방은 리스너가 접속을 받기 전에 먼저 등록해 둔다.
 		const auto networkManager = _CoreInstance->GetNetworkManager();
+		const auto roomManager = _CoreInstance->GetRoomManager();
+		if (!networkManager || !roomManager) {
+			std::cerr << "Core managers unavailable.\n";
+			ClearObject();
+			return false;
+		}
+		const auto defaultRoom = MakeShared<UGameRoom>(
+			_CoreInstance,
+			networkManager->GetIOContext(),
+			DEFAULT_GAME_ROOM_ID,
+			DEFAULT_ROOM_MAX_USERS);
+		if (!roomManager->AddRoom(defaultRoom)) {
+			std::cerr << "Default game room registration failed.\n";
+			ClearObject();
+			return false;
+		}
+
+		// 리스너는 네트워크 워커를 등록하기 전에 시작해야 한다. 지금은 이 PC(127.0.0.1)의 접속만 받는다.
 		BOOST_ERROR_CODE error;
 		const bool started = networkManager->StartListener(
 			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext()),

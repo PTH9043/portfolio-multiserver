@@ -1,6 +1,5 @@
 #include "CoreDefine.h"
 #include "USession.h"
-#include "URoom.h"
 #include "UCoreInstance.h"
 #include "ULogger.h"
 #include <boost/asio/bind_executor.hpp>
@@ -9,7 +8,7 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 #include <cstring>
-#include <stdexcept>
+#include <exception>
 #include <utility>
 
 #include "RuntimeTrace.h"
@@ -26,6 +25,22 @@ USession::USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket)
 
 USession::~USession() = default;
 
+SHPTR<const BUFFER> USession::MakePacketBuffer(const void* data, uint64 packetSize, uint16 packetType)
+{
+    if (packetSize > PACKET_MAX_BODY_SIZE || (packetSize != 0 && data == nullptr))
+        return {};
+
+    FPacketHeader header{};
+    header.type = packetType;
+    header.size = static_cast<uint16>(packetSize);
+
+    auto framedBuffer = MakeShared<BUFFER>(PACKET_HEADER_SIZE + packetSize);
+    std::memcpy(framedBuffer->data(), &header, PACKET_HEADER_SIZE);
+    if (packetSize != 0)
+        std::memcpy(framedBuffer->data() + PACKET_HEADER_SIZE, data, packetSize);
+    return framedBuffer;
+}
+
 uint64 USession::GetHash() const noexcept
 {
     return static_cast<uint64>(std::hash<const USession*>{}(this));
@@ -34,29 +49,6 @@ uint64 USession::GetHash() const noexcept
 bool USession::IsEqual(const USession& other) const noexcept
 {
     return this == &other;
-}
-
-SHPTR<URoom> USession::GetRoom() const
-{
-    RUNTIME_TRACE_SCOPE(USession, GetRoom, GetRuntimeTraceID());
-    if (!_Strand.running_in_this_thread())
-        throw std::logic_error("GetRoom requires the session strand");
-    return _Room.lock();
-}
-
-bool USession::RequestEnterRoom(const SHPTR<URoom>& room, FUNC<void(bool)> onComplete)
-{
-    RUNTIME_TRACE_SCOPE(USession, RequestEnterRoom, GetRuntimeTraceID());
-    const auto session = ThisWeak<USession>().lock();
-    if (!session || !room || !onComplete)
-        return false;
-
-    const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, RequestEnterRoom, GetRuntimeTraceID());
-    ASIO::post(_Strand, [session, room, onComplete = std::move(onComplete), submission]() mutable {
-        RUNTIME_TRACE_CALLBACK(USession, RequestEnterRoom, session->GetRuntimeTraceID(), submission);
-        session->ReserveRoom(room, std::move(onComplete));
-    });
-    return true;
 }
 
 void USession::Receive()
@@ -71,7 +63,7 @@ void USession::Receive()
         if (!session->_Socket.is_open())
             return;
 
-        // 완료 처리를 _Strand에서 실행해 ProcessingData와 입장 결과 처리가 _Room을 동시에 사용하지 않게 한다.
+        // 완료 처리를 _Strand에서 실행해 소켓·수신 버퍼·ProcessingData 접근을 직렬화한다.
         // 완료 처리가 Session을 붙잡아 수신이 걸려 있는 동안 Session이 소멸하지 않게 한다.
         const auto readSequence = RUNTIME_TRACE_EVENT(Submit, USession, Receive, session->GetRuntimeTraceID());
         session->_Socket.async_receive(
@@ -87,26 +79,40 @@ void USession::Receive()
 void USession::Send(const void* data, uint64 packetSize, uint16 packetType)
 {
     RUNTIME_TRACE_SCOPE(USession, Send, GetRuntimeTraceID());
-    if (packetSize > PACKET_MAX_BODY_SIZE || (packetSize != 0 && data == nullptr))
+    const auto framedBuffer = MakePacketBuffer(data, packetSize, packetType);
+    if (!framedBuffer)
         return;
 
-    FPacketHeader header{};
-    header.type = packetType;
-    header.size = static_cast<uint16>(packetSize);
+    SendShared(framedBuffer);
+}
 
-    BUFFER sendBuffer(PACKET_HEADER_SIZE + packetSize);
-    std::memcpy(sendBuffer.data(), &header, PACKET_HEADER_SIZE);
-    if (packetSize != 0)
-        std::memcpy(sendBuffer.data() + PACKET_HEADER_SIZE, data, packetSize);
+void USession::SendShared(const SHPTR<const BUFFER>& framedBuffer)
+{
+    RUNTIME_TRACE_SCOPE(USession, SendShared, GetRuntimeTraceID());
+    if (!framedBuffer || framedBuffer->empty() || _Closed.load(std::memory_order_acquire))
+        return;
 
     // 소켓은 여러 스레드에서 동시에 사용할 수 없으므로 대기열과 송신 시작을 _Strand에서 처리한다.
     // 게시한 작업이 실행될 때까지 Session을 유지한다.
-    const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, Send, GetRuntimeTraceID());
-    ASIO::post(_Strand, [session = ThisShared<USession>(), sendBuffer = std::move(sendBuffer), submission]() mutable {
-        RUNTIME_TRACE_CALLBACK(USession, Send, session->GetRuntimeTraceID(), submission);
-        // async_write가 끝나기 전에는 같은 소켓에 다른 쓰기를 시작하면 안 되므로 대기열이 비어 있었을 때만 시작한다.
-        session->_SendQueue.push(std::move(sendBuffer));
-        if (session->_SendQueue.size() == 1)
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, SendShared, GetRuntimeTraceID());
+    ASIO::post(_Strand, [session = ThisShared<USession>(), framedBuffer, submission]() mutable {
+        RUNTIME_TRACE_CALLBACK(USession, SendShared, session->GetRuntimeTraceID(), submission);
+        if (!session->_Socket.is_open() || session->_Closed.load(std::memory_order_relaxed))
+            return;
+
+        const uint64 frameBytes{ static_cast<uint64>(framedBuffer->size()) };
+        if (session->_QueuedSendBytes + frameBytes > SESSION_MAX_SEND_QUEUE_BYTES) {
+            const auto coreInstance = session->GetCoreInstance();
+            const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+            if (logger)
+                logger->TryLog(ELogLevel::Warning, "USession send queue exceeded limit; closing slow connection");
+            session->CloseConnection();
+            return;
+        }
+
+        session->_PendingSendQueue.push_back(std::move(framedBuffer));
+        session->_QueuedSendBytes += frameBytes;
+        if (session->_SendingBatch.empty())
             session->StartSend();
     });
 }
@@ -114,7 +120,7 @@ void USession::Send(const void* data, uint64 packetSize, uint16 packetType)
 void USession::Close()
 {
     RUNTIME_TRACE_SCOPE(USession, Close, GetRuntimeTraceID());
-    // 소켓과 _Room은 _Strand에서만 사용하므로 다른 스레드의 호출은 _Strand로 넘긴다.
+    // 소켓과 송신 대기열은 _Strand에서만 사용하므로 다른 스레드의 호출은 _Strand로 넘긴다.
     const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, Close, GetRuntimeTraceID());
     ASIO::dispatch(_Strand, [session = ThisShared<USession>(), submission] {
         RUNTIME_TRACE_CALLBACK(USession, Close, session->GetRuntimeTraceID(), submission);
@@ -122,57 +128,45 @@ void USession::Close()
     });
 }
 
-void USession::ReserveRoom(const SHPTR<URoom>& room, FUNC<void(bool)> onComplete)
+bool USession::PostToSession(FUNC<void()> task)
 {
-    RUNTIME_TRACE_SCOPE(USession, ReserveRoom, GetRuntimeTraceID());
-    // 닫힌 뒤에 입장하면 Close의 정리가 이미 끝나 Room 목록에서 제거할 기회가 없다.
-    if (!_Socket.is_open() || !_Room.expired()) {
-        onComplete(false);
-        return;
-    }
+    RUNTIME_TRACE_SCOPE(USession, PostToSession, GetRuntimeTraceID());
+    const auto session = ThisWeak<USession>().lock();
+    if (!session || !task)
+        return false;
 
-    const auto session = ThisShared<USession>();
-    const bool requested = room->RequestAddSession(session, [session, room, onComplete](bool entered) {
-        // Room strand에서 실행된다. _Room은 이 Session의 strand에서만 바꾸므로 결과를 넘긴다.
-        const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, ReserveRoom, session->GetRuntimeTraceID());
-        ASIO::post(session->_Strand, [session, room, entered, onComplete, submission] {
-            RUNTIME_TRACE_CALLBACK(USession, ReserveRoom, session->GetRuntimeTraceID(), submission);
-            session->FinishEnterRoom(room, entered, onComplete);
-        });
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, PostToSession, GetRuntimeTraceID());
+    ASIO::post(_Strand, [session, task = std::move(task), submission]() mutable {
+        RUNTIME_TRACE_CALLBACK(USession, PostToSession, session->GetRuntimeTraceID(), submission);
+        task();
     });
-    if (!requested) {
-        onComplete(false);
-        return;
-    }
-
-    // Room의 결과를 기다리는 동안 다른 입장 요청이 실패하도록 예약한다.
-    // 결과는 이 strand로 돌아오므로 게시가 성공한 뒤 예약해도 결과보다 먼저 기록된다.
-    _Room = room;
+    return true;
 }
 
-void USession::FinishEnterRoom(const SHPTR<URoom>& room, bool entered, const FUNC<void(bool)>& onComplete)
+void USession::OnDisconnected()
 {
-    RUNTIME_TRACE_SCOPE(USession, FinishEnterRoom, GetRuntimeTraceID());
-    // 결과를 기다리는 동안 Close가 예약을 지웠다면 Room 목록에서도 추가 뒤에 제거되므로 실패로 알린다.
-    const bool reserved = _Room.lock() == room;
-
-    // 거절되면 Room은 목록에 추가하지 않았으므로 Room 쪽에서 되돌릴 것은 없다.
-    // 이 요청이 예약한 방일 때만 예약을 지운다.
-    if (!entered && reserved)
-        _Room.reset();
-
-    onComplete(entered && reserved);
 }
 
 void USession::StartSend()
 {
     RUNTIME_TRACE_SCOPE(USession, StartSend, GetRuntimeTraceID());
-    // 앞 버퍼는 송신 완료까지 대기열에 남는다. 대기열 뒤에 버퍼를 넣어도 앞 버퍼의 데이터 주소는 바뀌지 않는다.
-    const BUFFER& sendBuffer = _SendQueue.front();
+    _SendingBatch.clear();
+    _SendingBufferView.clear();
+
+    while (!_PendingSendQueue.empty() && _SendingBatch.size() < SESSION_MAX_WRITE_BATCH_COUNT) {
+        SHPTR<const BUFFER> frame = std::move(_PendingSendQueue.front());
+        _PendingSendQueue.pop_front();
+        _SendingBufferView.emplace_back(ASIO::buffer(frame->data(), frame->size()));
+        _SendingBatch.push_back(std::move(frame));
+    }
+
+    if (_SendingBatch.empty())
+        return;
+
     const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, StartSend, GetRuntimeTraceID());
     ASIO::async_write(
         _Socket,
-        ASIO::buffer(sendBuffer.data(), sendBuffer.size()),
+        _SendingBufferView,
         ASIO::bind_executor(_Strand, [session = ThisShared<USession>(), submission](const BOOST_ERROR_CODE& error, uint64) {
             RUNTIME_TRACE_CALLBACK(USession, StartSend, session->GetRuntimeTraceID(), submission);
             session->OnSend(error);
@@ -182,21 +176,38 @@ void USession::StartSend()
 void USession::OnSend(const BOOST_ERROR_CODE& error)
 {
     RUNTIME_TRACE_SCOPE(USession, OnSend, GetRuntimeTraceID());
+    uint64 sentBytes{ 0 };
+    for (const SHPTR<const BUFFER>& frame : _SendingBatch)
+        sentBytes += static_cast<uint64>(frame->size());
+
+    _SendingBatch.clear();
+    _SendingBufferView.clear();
+    _QueuedSendBytes = (_QueuedSendBytes > sentBytes) ? (_QueuedSendBytes - sentBytes) : 0;
+
     if (error) {
         // 쓰기가 끝난 뒤라 대기열 버퍼를 사용하는 작업이 없다. 닫는 소켓으로는 보낼 수 없으므로 남은 버퍼를 버린다.
-        _SendQueue = QUEUE<BUFFER>{};
+        _PendingSendQueue.clear();
+        _QueuedSendBytes = 0;
         CloseConnection();
         return;
     }
 
-    _SendQueue.pop();
-    if (!_SendQueue.empty())
+    if (!_PendingSendQueue.empty() && _Socket.is_open())
         StartSend();
 }
 
 void USession::CloseConnection()
 {
     RUNTIME_TRACE_SCOPE(USession, CloseConnection, GetRuntimeTraceID());
+    _Closed.store(true, std::memory_order_release);
+
+    // 아직 전송 시작 전인 대기 버퍼만 즉시 비운다. 전송 중인 _SendingBatch는 취소 완료(OnSend)까지 유지한다.
+    uint64 droppedBytes{ 0 };
+    for (const SHPTR<const BUFFER>& frame : _PendingSendQueue)
+        droppedBytes += static_cast<uint64>(frame->size());
+    _PendingSendQueue.clear();
+    _QueuedSendBytes = (_QueuedSendBytes > droppedBytes) ? (_QueuedSendBytes - droppedBytes) : 0;
+
     // 진행 중인 수신·송신은 취소되며 오류와 함께 완료 처리가 실행된다. 이미 닫힌 소켓은 오류 없이 넘어간다.
     BOOST_ERROR_CODE error;
     _Socket.close(error);
@@ -207,20 +218,15 @@ void USession::CloseConnection()
             logger->TryLogError("USession::Close failed", error);
     }
 
-    // 방에 들어가지 않은 Session도 매니저 목록에 있으므로 방 확인보다 먼저 제거를 요청한다.
     // 접속 처리가 Receive 전에 추가를 게시하므로 이 제거는 추가 뒤에 실행된다. 여러 번 요청해도 된다.
     const auto networkManager = coreInstance ? coreInstance->GetNetworkManager() : nullptr;
     if (networkManager)
         networkManager->RequestRemoveSession(ThisShared<USession>());
 
-    // 예약 중인 방도 포함한다. 추가 요청보다 나중에 게시하므로 Room에서는 추가 뒤에 제거된다.
-    const auto room = _Room.lock();
-    if (!room)
-        return;
-
-    // 게시가 예외로 실패하면 _Room을 남겨 다음 Close에서 다시 요청할 수 있게 한다.
-    room->RequestRemoveSession(ThisShared<USession>());
-    _Room.reset();
+    if (!_DisconnectedNotified) {
+        _DisconnectedNotified = true;
+        OnDisconnected();
+    }
 }
 
 void USession::CloseOnProcessingFailure(const STRINGVIEW reason)

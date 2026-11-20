@@ -1,7 +1,7 @@
 #include "CoreDefine.h"
 #include "RuntimeTrace.h"
 
-#ifdef _WIN32
+#if defined(_WIN32) && CORE_ENABLE_RUNTIME_TRACE
 #include <Windows.h>
 #include <cstddef>
 #include <cstdio>
@@ -41,11 +41,37 @@ struct FTraceRecord {
 static_assert(sizeof(FTraceHeader) == 64 && offsetof(FTraceHeader, RunID) == 32);
 static_assert(sizeof(FTraceRecord) == 256 && offsetof(FTraceRecord, Source) == 184);
 
+STATIC_CONSTEXPR uint64 STREAM_BUFFER_CAPACITY{ 4096 };
+STATIC_CONSTEXPR uint64 STREAM_FLUSH_THRESHOLD{ 256 };
+STATIC_CONSTEXPR MILLISECONDS STREAM_FLUSH_INTERVAL{ 50 };
+STATIC_CONSTEXPR uint64 FLIGHT_RING_CAPACITY{ 16384 };
+
 SHARED_MUTEX traceLock;
+COND_VARIABLE writerWakeCV;
+COND_VARIABLE writerSpaceCV;
 HANDLE traceFile = INVALID_HANDLE_VALUE;
 ATOMIC_BOOL recording{};
+ATOMIC<ERuntimeTraceMode> activeMode{ ERuntimeTraceMode::Off };
 ATOMIC_UINT64 lastObject{};
 uint64 lastSequence{};
+uint64 activeRunID{};
+DWORD activeProcessID{};
+
+// AsyncStream 이중 버퍼(네트워크·방 워커는 메모리 복사만 하고 디스크 WriteFile은 전용 스레드가 일괄 처리)
+UQPTR<FTraceRecord[]> frontBuffer;
+UQPTR<FTraceRecord[]> backBuffer;
+uint64 frontCount{};
+uint64 backCount{};
+bool writerBusy{};
+bool writerStop{};
+bool flushRequested{};
+THREAD writerThread;
+
+// FlightRecorder 메모리 링버퍼(평소 디스크 I/O 0회, Error 또는 덤프 요청 시 .cvtrace로 일괄 저장)
+UQPTR<FTraceRecord[]> flightRing;
+uint64 flightTotalWritten{};
+bool flightDumped{};
+
 thread_local uint64 currentScope{};
 thread_local uint64 currentObject{};
 
@@ -62,13 +88,20 @@ void ReportFileError(DWORD error) noexcept
 
 bool WriteBytes(HANDLE file, const void* data, DWORD length) noexcept
 {
-    DWORD written{};
-    if (!WriteFile(file, data, length, &written, nullptr))
-        return false;
-    if (written == length)
-        return true;
-    SetLastError(ERROR_WRITE_FAULT);
-    return false;
+    const uint8* cursor = static_cast<const uint8*>(data);
+    DWORD remaining = length;
+    while (remaining > 0) {
+        DWORD written{};
+        if (!WriteFile(file, cursor, remaining, &written, nullptr))
+            return false;
+        if (written == 0) {
+            SetLastError(ERROR_WRITE_FAULT);
+            return false;
+        }
+        cursor += written;
+        remaining -= written;
+    }
+    return true;
 }
 
 template<uint64 N>
@@ -79,13 +112,12 @@ void CopyName(char (&target)[N], const char* source) noexcept
     target[length] = '\0';
 }
 
-// seq를 정한 스레드가 바로 그 레코드를 쓴다. 서버에 과거 이벤트를 모아 두지 않는다.
-uint64 WriteRecord(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite site, uint64 parent, uint64 caller) noexcept
+void FillRecord(FTraceRecord& event, uint64 sequence, ERuntimeTraceEvent kind, uint64 object,
+    FRuntimeTraceSite site, uint64 parent, uint64 caller) noexcept
 {
     FILETIME time{};
     GetSystemTimePreciseAsFileTime(&time);
-    FTraceRecord event{};
-    event.Sequence = lastSequence + 1;
+    event.Sequence = sequence;
     event.Time = FileTimeValue(time);
     event.Object = object;
     event.CallerObject = caller;
@@ -93,33 +125,10 @@ uint64 WriteRecord(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite sit
     event.ThreadID = GetCurrentThreadId();
     event.Line = site.Line;
     event.Kind = static_cast<uint32>(kind);
+    event.Reserved = 0;
     CopyName(event.Type, site.Type);
     CopyName(event.Function, site.Function);
     CopyName(event.Source, site.Source);
-    if (!WriteBytes(traceFile, &event, sizeof(event))) {
-        const DWORD error = GetLastError();
-        CloseHandle(traceFile);
-        traceFile = INVALID_HANDLE_VALUE;
-        recording.store(false, std::memory_order_release);
-        ReportFileError(error);
-        return 0;
-    }
-    return ++lastSequence;
-}
-
-uint64 Publish(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite site, uint64 parent, uint64 caller) noexcept
-{
-    if (!recording.load(std::memory_order_acquire))
-        return 0;
-    const DWORD savedError = GetLastError();
-    uint64 sequence{};
-    {
-        EXCLUSIVE_LOCK_GUARD guard{traceLock};
-        if (traceFile != INVALID_HANDLE_VALUE)
-            sequence = WriteRecord(kind, object, site, parent, caller);
-    }
-    SetLastError(savedError);
-    return sequence;
 }
 
 // 파일을 열 때까지 상위 디렉터리를 유지한다. 디렉터리 정션·심볼릭 링크는 기록 대상으로 따라가지 않는다.
@@ -152,7 +161,7 @@ public:
     }
 
 private:
-    HANDLE _Handle{INVALID_HANDLE_VALUE};
+    HANDLE _Handle{ INVALID_HANDLE_VALUE };
 };
 
 HANDLE CreateTraceFile(uint64 runID, DWORD pid, DWORD& error)
@@ -201,19 +210,10 @@ HANDLE CreateTraceFile(uint64 runID, DWORD pid, DWORD& error)
         error = GetLastError();
     return file;
 }
-}
 
-FRuntimeTraceRun::FRuntimeTraceRun() noexcept
+HANDLE OpenAndWriteHeader(uint64 runID, DWORD pid, DWORD& openError) noexcept
 {
-    const DWORD pid = GetCurrentProcessId();
-    FILETIME created{}, exited{}, kernel{}, user{};
-    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
-        ReportFileError(GetLastError());
-        return;
-    }
-    const uint64 runID = FileTimeValue(created);
     HANDLE file = INVALID_HANDLE_VALUE;
-    DWORD openError{};
     try {
         file = CreateTraceFile(runID, pid, openError);
     }
@@ -223,10 +223,9 @@ FRuntimeTraceRun::FRuntimeTraceRun() noexcept
     catch (...) {
         openError = ERROR_NOT_ENOUGH_MEMORY;
     }
-    if (file == INVALID_HANDLE_VALUE) {
-        ReportFileError(openError);
-        return;
-    }
+    if (file == INVALID_HANDLE_VALUE)
+        return INVALID_HANDLE_VALUE;
+
     FTraceHeader header{};
     std::memcpy(header.Magic, "CVTRACE1", sizeof(header.Magic));
     header.Version = 1;
@@ -236,34 +235,256 @@ FRuntimeTraceRun::FRuntimeTraceRun() noexcept
     header.Flags = 1;
     header.RunID = runID;
     if (!WriteBytes(file, &header, sizeof(header))) {
-        const DWORD error = GetLastError();
+        openError = GetLastError();
         CloseHandle(file);
-        ReportFileError(error);
+        return INVALID_HANDLE_VALUE;
+    }
+    return file;
+}
+
+void RunAsyncWriter() noexcept
+{
+    for (;;) {
+        uint64 countToWrite{};
+        HANDLE fileHandle = INVALID_HANDLE_VALUE;
+        {
+            std::unique_lock<SHARED_MUTEX> lock{ traceLock };
+            if (frontCount == 0 && !writerStop) {
+                writerWakeCV.wait_for(lock, STREAM_FLUSH_INTERVAL, [] {
+                    return frontCount >= STREAM_FLUSH_THRESHOLD || flushRequested || writerStop;
+                });
+            }
+            if (frontCount == 0 && writerStop)
+                break;
+            if (frontCount == 0) {
+                flushRequested = false;
+                continue;
+            }
+            std::swap(frontBuffer, backBuffer);
+            countToWrite = frontCount;
+            backCount = countToWrite;
+            frontCount = 0;
+            flushRequested = false;
+            writerBusy = true;
+            fileHandle = traceFile;
+        }
+        writerSpaceCV.notify_all();
+
+        bool writeOk = false;
+        DWORD writeError{};
+        if (fileHandle != INVALID_HANDLE_VALUE && countToWrite > 0) {
+            const DWORD totalBytes = static_cast<DWORD>(countToWrite * sizeof(FTraceRecord));
+            writeOk = WriteBytes(fileHandle, backBuffer.get(), totalBytes);
+            if (!writeOk)
+                writeError = GetLastError();
+        }
+
+        {
+            EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+            backCount = 0;
+            writerBusy = false;
+            if (!writeOk && traceFile != INVALID_HANDLE_VALUE) {
+                CloseHandle(traceFile);
+                traceFile = INVALID_HANDLE_VALUE;
+                recording.store(false, std::memory_order_release);
+                activeMode.store(ERuntimeTraceMode::Off, std::memory_order_release);
+                ReportFileError(writeError);
+            }
+        }
+        writerSpaceCV.notify_all();
+    }
+}
+
+uint64 Publish(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite site, uint64 parent, uint64 caller) noexcept
+{
+    if (!recording.load(std::memory_order_acquire))
+        return 0;
+
+    const ERuntimeTraceMode mode = activeMode.load(std::memory_order_acquire);
+    if (mode == ERuntimeTraceMode::Off)
+        return 0;
+
+    const DWORD savedError = GetLastError();
+    uint64 sequence{};
+
+    if (mode == ERuntimeTraceMode::FlightRecorder) {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        if (flightRing && recording.load(std::memory_order_relaxed)) {
+            sequence = ++lastSequence;
+            FTraceRecord& slot = flightRing[flightTotalWritten % FLIGHT_RING_CAPACITY];
+            FillRecord(slot, sequence, kind, object, site, parent, caller);
+            ++flightTotalWritten;
+        }
+        SetLastError(savedError);
+        return sequence;
+    }
+
+    // AsyncStream: 락 안에서는 메모리 버퍼 기록만 수행하고 디스크 I/O는 백그라운드 스레드에 넘긴다.
+    bool shouldWake = false;
+    {
+        std::unique_lock<SHARED_MUTEX> lock{ traceLock };
+        while (frontCount >= STREAM_BUFFER_CAPACITY && traceFile != INVALID_HANDLE_VALUE && !writerStop) {
+            writerWakeCV.notify_one();
+            writerSpaceCV.wait(lock);
+        }
+        if (traceFile != INVALID_HANDLE_VALUE && !writerStop && frontBuffer) {
+            sequence = ++lastSequence;
+            FillRecord(frontBuffer[frontCount], sequence, kind, object, site, parent, caller);
+            ++frontCount;
+            shouldWake = (frontCount >= STREAM_FLUSH_THRESHOLD);
+        }
+    }
+    if (shouldWake)
+        writerWakeCV.notify_one();
+
+    SetLastError(savedError);
+    return sequence;
+}
+}
+
+FRuntimeTraceRun::FRuntimeTraceRun(ERuntimeTraceMode mode) noexcept
+{
+    if (mode == ERuntimeTraceMode::Off)
+        return;
+
+    const DWORD pid = GetCurrentProcessId();
+    FILETIME created{}, exited{}, kernel{}, user{};
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+        ReportFileError(GetLastError());
         return;
     }
-    EXCLUSIVE_LOCK_GUARD guard{traceLock};
-    traceFile = file;
-    lastSequence = 0;
-    _OwnsFile = true;
-    recording.store(true, std::memory_order_release);
+    const uint64 runID = FileTimeValue(created);
+
+    if (mode == ERuntimeTraceMode::FlightRecorder) {
+        UQPTR<FTraceRecord[]> ring;
+        try {
+            ring = UQPTR<FTraceRecord[]>(new FTraceRecord[FLIGHT_RING_CAPACITY]{});
+        }
+        catch (...) {
+            ReportFileError(ERROR_NOT_ENOUGH_MEMORY);
+            return;
+        }
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        flightRing = std::move(ring);
+        flightTotalWritten = 0;
+        flightDumped = false;
+        lastSequence = 0;
+        activeRunID = runID;
+        activeProcessID = pid;
+        _OwnsSession = true;
+        activeMode.store(ERuntimeTraceMode::FlightRecorder, std::memory_order_release);
+        recording.store(true, std::memory_order_release);
+        return;
+    }
+
+    // AsyncStream 모드: 헤더를 먼저 쓰고 이중 버퍼 + 백그라운드 기록 스레드를 기동한다.
+    DWORD openError{};
+    HANDLE file = OpenAndWriteHeader(runID, pid, openError);
+    if (file == INVALID_HANDLE_VALUE) {
+        ReportFileError(openError);
+        return;
+    }
+
+    UQPTR<FTraceRecord[]> bufA;
+    UQPTR<FTraceRecord[]> bufB;
+    try {
+        bufA = UQPTR<FTraceRecord[]>(new FTraceRecord[STREAM_BUFFER_CAPACITY]{});
+        bufB = UQPTR<FTraceRecord[]>(new FTraceRecord[STREAM_BUFFER_CAPACITY]{});
+    }
+    catch (...) {
+        CloseHandle(file);
+        ReportFileError(ERROR_NOT_ENOUGH_MEMORY);
+        return;
+    }
+
+    {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        traceFile = file;
+        frontBuffer = std::move(bufA);
+        backBuffer = std::move(bufB);
+        frontCount = 0;
+        backCount = 0;
+        writerBusy = false;
+        writerStop = false;
+        flushRequested = false;
+        lastSequence = 0;
+        activeRunID = runID;
+        activeProcessID = pid;
+        _OwnsSession = true;
+        activeMode.store(ERuntimeTraceMode::AsyncStream, std::memory_order_release);
+        recording.store(true, std::memory_order_release);
+    }
+
+    try {
+        writerThread = THREAD{ RunAsyncWriter };
+    }
+    catch (...) {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        recording.store(false, std::memory_order_release);
+        activeMode.store(ERuntimeTraceMode::Off, std::memory_order_release);
+        CloseHandle(traceFile);
+        traceFile = INVALID_HANDLE_VALUE;
+        frontBuffer.reset();
+        backBuffer.reset();
+        _OwnsSession = false;
+        ReportFileError(ERROR_NOT_ENOUGH_MEMORY);
+    }
 }
 
 FRuntimeTraceRun::~FRuntimeTraceRun()
 {
-    if (!_OwnsFile)
+    if (!_OwnsSession)
         return;
-    EXCLUSIVE_LOCK_GUARD guard{traceLock};
-    if (traceFile != INVALID_HANDLE_VALUE) {
-        WriteRecord(ERuntimeTraceEvent::End, 0, {"ServerApp", "End", "Core/Private/RuntimeTrace.cpp", static_cast<Core::uint32>(__LINE__)}, 0, 0);
+
+    const ERuntimeTraceMode mode = activeMode.load(std::memory_order_acquire);
+    if (mode == ERuntimeTraceMode::FlightRecorder) {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        recording.store(false, std::memory_order_release);
+        activeMode.store(ERuntimeTraceMode::Off, std::memory_order_release);
+        flightRing.reset();
+        flightTotalWritten = 0;
+        flightDumped = false;
+        return;
+    }
+
+    {
+        std::unique_lock<SHARED_MUTEX> lock{ traceLock };
+        recording.store(false, std::memory_order_release);
+        activeMode.store(ERuntimeTraceMode::Off, std::memory_order_release);
+        while (frontCount >= STREAM_BUFFER_CAPACITY && traceFile != INVALID_HANDLE_VALUE && !writerStop) {
+            writerWakeCV.notify_one();
+            writerSpaceCV.wait(lock);
+        }
+        if (traceFile != INVALID_HANDLE_VALUE && frontBuffer) {
+            const uint64 endSeq = ++lastSequence;
+            FillRecord(frontBuffer[frontCount], endSeq, ERuntimeTraceEvent::End, 0,
+                { "ServerApp", "End", "Core/Private/RuntimeTrace.cpp", static_cast<uint32>(__LINE__) }, 0, 0);
+            ++frontCount;
+        }
+        writerStop = true;
+        flushRequested = true;
+    }
+    writerWakeCV.notify_all();
+    writerSpaceCV.notify_all();
+
+    if (writerThread.joinable())
+        writerThread.join();
+
+    {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
         if (traceFile != INVALID_HANDLE_VALUE) {
             CloseHandle(traceFile);
             traceFile = INVALID_HANDLE_VALUE;
         }
+        frontBuffer.reset();
+        backBuffer.reset();
+        frontCount = 0;
+        backCount = 0;
+        writerStop = false;
     }
-    recording.store(false, std::memory_order_release);
 }
 
-FRuntimeTraceID::FRuntimeTraceID() noexcept : _Value{lastObject.fetch_add(1, std::memory_order_relaxed) + 1}
+FRuntimeTraceID::FRuntimeTraceID() noexcept : _Value{ lastObject.fetch_add(1, std::memory_order_relaxed) + 1 }
 {}
 
 FRuntimeTraceID::FRuntimeTraceID(const FRuntimeTraceID&) noexcept : FRuntimeTraceID{}
@@ -274,15 +495,89 @@ uint64 RecordRuntimeTrace(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceS
     return Publish(kind, object, site, currentScope, currentObject);
 }
 
+bool TriggerRuntimeTraceDump() noexcept
+{
+    const ERuntimeTraceMode mode = activeMode.load(std::memory_order_acquire);
+    if (mode == ERuntimeTraceMode::Off)
+        return false;
+
+    if (mode == ERuntimeTraceMode::AsyncStream) {
+        {
+            EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+            if (traceFile == INVALID_HANDLE_VALUE)
+                return false;
+            flushRequested = true;
+        }
+        writerWakeCV.notify_one();
+        return true;
+    }
+
+    // FlightRecorder 모드: 링버퍼 스냅샷을 1..N 연속 순번으로 재매핑해 ChangeViewer가 그대로 읽는 .cvtrace를 생성한다.
+    UQPTR<FTraceRecord[]> snapshot;
+    uint64 count{};
+    uint64 runID{};
+    DWORD pid{};
+    {
+        EXCLUSIVE_LOCK_GUARD guard{ traceLock };
+        if (!flightRing || flightDumped || flightTotalWritten == 0)
+            return false;
+
+        count = (flightTotalWritten < FLIGHT_RING_CAPACITY) ? flightTotalWritten : FLIGHT_RING_CAPACITY;
+        try {
+            snapshot = UQPTR<FTraceRecord[]>(new FTraceRecord[count + 1]);
+        }
+        catch (...) {
+            return false;
+        }
+
+        const uint64 startPos = (flightTotalWritten > FLIGHT_RING_CAPACITY)
+            ? (flightTotalWritten - FLIGHT_RING_CAPACITY) : 0;
+        const uint64 firstOldSeq = flightRing[startPos % FLIGHT_RING_CAPACITY].Sequence;
+
+        for (uint64 i = 0; i < count; ++i) {
+            FTraceRecord rec = flightRing[(startPos + i) % FLIGHT_RING_CAPACITY];
+            rec.Sequence = i + 1;
+            if (rec.Parent >= firstOldSeq && rec.Parent < firstOldSeq + i)
+                rec.Parent = (rec.Parent - firstOldSeq) + 1;
+            else
+                rec.Parent = 0;
+            snapshot[i] = rec;
+        }
+        FillRecord(snapshot[count], count + 1, ERuntimeTraceEvent::End, 0,
+            { "ServerApp", "End", "Core/Private/RuntimeTrace.cpp", static_cast<uint32>(__LINE__) }, 0, 0);
+        flightDumped = true;
+        runID = activeRunID;
+        pid = activeProcessID;
+    }
+
+    DWORD openError{};
+    HANDLE file = OpenAndWriteHeader(runID, pid, openError);
+    if (file == INVALID_HANDLE_VALUE) {
+        ReportFileError(openError);
+        return false;
+    }
+    const DWORD totalBytes = static_cast<DWORD>((count + 1) * sizeof(FTraceRecord));
+    const bool ok = WriteBytes(file, snapshot.get(), totalBytes);
+    if (!ok)
+        ReportFileError(GetLastError());
+    CloseHandle(file);
+    return ok;
+}
+
+ERuntimeTraceMode GetRuntimeTraceMode() noexcept
+{
+    return activeMode.load(std::memory_order_acquire);
+}
+
 FRuntimeTraceScope::FRuntimeTraceScope(uint64 object, FRuntimeTraceSite site) noexcept
-    : _PreviousScope{currentScope}, _PreviousObject{currentObject}
+    : _PreviousScope{ currentScope }, _PreviousObject{ currentObject }
 {
     currentScope = Publish(ERuntimeTraceEvent::Call, object, site, currentScope, currentObject);
     currentObject = currentScope ? object : 0;
 }
 
 FRuntimeTraceScope::FRuntimeTraceScope(uint64 object, FRuntimeTraceSite site, uint64 submission) noexcept
-    : _PreviousScope{currentScope}, _PreviousObject{currentObject}
+    : _PreviousScope{ currentScope }, _PreviousObject{ currentObject }
 {
     currentScope = Publish(ERuntimeTraceEvent::Callback, object, site, submission, 0);
     currentObject = currentScope ? object : 0;

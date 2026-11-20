@@ -2,6 +2,7 @@
 
 #include <crtdbg.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
@@ -58,9 +59,6 @@ int main(int argc, char* argv[])
 {
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 
-	Core::FRuntimeTraceRun runtimeTrace;
-	RUNTIME_TRACE_SCOPE(ServerApp, main, 0);
-
 	// protobuf 내부(absl)는 잘못된 패킷 해석 같은 경고를 Logger를 거치지 않고 stderr에 직접 쓴다.
 	// 해석 실패는 UServerSession이 Logger에 Warning으로 남기므로 중복인 absl 출력은 끄고 FATAL만 남긴다.
 	// 초기화 전에는 기준과 관계없이 모두 stderr로 나가므로 InitializeLog를 먼저 부른다. (2026-11-20 사용자 선택)
@@ -69,12 +67,28 @@ int main(int argc, char* argv[])
 
 	Core::uint32 workerCount = 0;
 	Core::uint32 port = 0;
-	if (argc != 3
+	Core::ERuntimeTraceMode traceMode = Core::ERuntimeTraceMode::AsyncStream;
+	if ((argc != 3 && argc != 4)
 		|| !ParsePositiveNumber(argv[1], static_cast<Core::uint32>(-1), workerCount)
 		|| !ParsePositiveNumber(argv[2], 65535, port)) {
-		fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> (positive integer, port 1-65535)\n");
+		fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off]\n");
 		return 1;
 	}
+	if (argc == 4) {
+		if (strcmp(argv[3], "--trace=stream") == 0)
+			traceMode = Core::ERuntimeTraceMode::AsyncStream;
+		else if (strcmp(argv[3], "--trace=flight") == 0)
+			traceMode = Core::ERuntimeTraceMode::FlightRecorder;
+		else if (strcmp(argv[3], "--trace=off") == 0)
+			traceMode = Core::ERuntimeTraceMode::Off;
+		else {
+			fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off]\n");
+			return 1;
+		}
+	}
+
+	Core::FRuntimeTraceRun runtimeTrace{ traceMode };
+	RUNTIME_TRACE_SCOPE(ServerApp, main, 0);
 
 	bool success = false;
 	{
