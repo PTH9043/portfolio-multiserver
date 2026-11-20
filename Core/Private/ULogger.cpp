@@ -90,6 +90,7 @@ bool ULogger::Start(FUNC<void(const LOGBATCH_CONTAINER&)> onBatch, FUNC<void(EXP
 
 bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
 {
+    const uint64 callerObject = GetCurrentRuntimeTraceObject();
     RUNTIME_TRACE_SCOPE(ULogger, TryLog, GetRuntimeTraceID());
     if (level == ELogLevel::Error)
         TriggerRuntimeTraceDump();
@@ -98,7 +99,11 @@ bool ULogger::TryLog(ELogLevel level, STRINGVIEW message)
 
     bool accepted = false;
     try {
-        _LogQueue.push(MakeShared<FLogRecord>(level, message));
+        SHPTR<FLogRecord> record = MakeShared<FLogRecord>(level, message);
+        record->TraceSequence = GetCurrentRuntimeTraceSeq();
+        record->TraceObjectID = callerObject ? callerObject : GetRuntimeTraceID();
+        record->ProducerOSThreadID = GetCurrentRuntimeTraceThreadID();
+        _LogQueue.push(std::move(record));
         accepted = true;
         const auto submission = RUNTIME_TRACE_EVENT(Submit, ULogger, TryLog, GetRuntimeTraceID());
         ASIO::post(_LogContext, [this, submission] {

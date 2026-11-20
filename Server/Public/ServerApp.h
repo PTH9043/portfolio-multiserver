@@ -64,6 +64,7 @@ private:
 	EXPECTION_PTR _LoggerFailure;
 	ERROR_CODE _InputFailure;
 	bool _WorkersRegistered{ false };
+	uint16 _ListenPort{ 0 };
 	SHPTR<UCoreInstance> _CoreInstance;
 	UQPTR<UServerInput> _ServerInput;
 };

@@ -33,6 +33,9 @@ struct FLogRecord
 	THREAD_ID ProducerThreadID;
 	ELogLevel Level;
 	uint64 QueueSequenceNum{};
+	uint64 TraceSequence{};
+	uint64 TraceObjectID{};
+	uint32 ProducerOSThreadID{};
 	FString Message;
 };
 

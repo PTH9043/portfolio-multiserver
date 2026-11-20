@@ -31,6 +31,61 @@ const char* GetLogLevelName(const ELogLevel level) noexcept
 	default: return "INFO";
 	}
 }
+
+void AppendJsonEscaped(std::string& output, const STRINGVIEW text)
+{
+	static constexpr char HEX_DIGITS[] = "0123456789abcdef";
+	for (const char ch : text) {
+		const uint8 byte = static_cast<uint8>(ch);
+		switch (ch) {
+		case '"': output.append("\\\""); break;
+		case '\\': output.append("\\\\"); break;
+		case '\b': output.append("\\b"); break;
+		case '\f': output.append("\\f"); break;
+		case '\n': output.append("\\n"); break;
+		case '\r': output.append("\\r"); break;
+		case '\t': output.append("\\t"); break;
+		default:
+			if (byte < 0x20U) {
+				output.append("\\u00");
+				output.push_back(HEX_DIGITS[(byte >> 4) & 0x0FU]);
+				output.push_back(HEX_DIGITS[byte & 0x0FU]);
+			}
+			else {
+				output.push_back(ch);
+			}
+			break;
+		}
+	}
+}
+
+std::string FormatRuntimeLogBatch(const LOGBATCH_CONTAINER& batch)
+{
+	std::string payload;
+	payload.reserve(static_cast<uint64>(batch.size()) * 160ULL);
+	for (const auto& record : batch) {
+		if (!record)
+			continue;
+		const int64 epochMs = std::chrono::duration_cast<MILLISECONDS>(
+			record->OccurredAtTime.time_since_epoch()).count();
+		payload.append("{\"seq\":");
+		payload.append(std::to_string(record->QueueSequenceNum));
+		payload.append(",\"time\":");
+		payload.append(std::to_string(epochMs));
+		payload.append(",\"level\":\"");
+		payload.append(GetLogLevelName(record->Level));
+		payload.append("\",\"thread\":");
+		payload.append(std::to_string(record->ProducerOSThreadID));
+		payload.append(",\"traceSeq\":");
+		payload.append(std::to_string(record->TraceSequence));
+		payload.append(",\"objectId\":\"");
+		payload.append(std::to_string(record->TraceObjectID));
+		payload.append("\",\"msg\":\"");
+		AppendJsonEscaped(payload, record->Message.View());
+		payload.append("\"}\n");
+	}
+	return payload;
+}
 }
 
 UServerApp::UServerApp()
@@ -129,6 +184,7 @@ bool UServerApp::Start(const uint16 port)
 		return false;
 	}
 
+	_ListenPort = port;
 	_bRunning.store(true);
 	std::cout << "Server Start\n";
 	return true;
@@ -168,9 +224,17 @@ bool UServerApp::RegisterWorkers(uint32 networkWorkerCount)
 				std::cout << std::flush;
 				if (!std::cout)
 					throw std::runtime_error("Log console output failed");
+				const std::string jsonBatch = FormatRuntimeLogBatch(batch);
+				AppendRuntimeLogBatch(STRINGVIEW{ jsonBatch.data(), jsonBatch.size() });
 			},
 			[this](EXPECTION_PTR failure) noexcept { ReportFailure(_LoggerFailed, _LoggerFailure, failure); }))
 			return false;
+
+		{
+			FString readyMessage{ "Server ready on 127.0.0.1:" };
+			readyMessage << std::to_string(_ListenPort) << " (workers=" << std::to_string(networkWorkerCount) << ")";
+			logger->TryLog(ELogLevel::Info, readyMessage.View());
+		}
 
 		if (!threadManager->RegisterFunc(ULogger::RunWorker, logger.get()))
 			return false;

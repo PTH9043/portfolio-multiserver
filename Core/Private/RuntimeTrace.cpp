@@ -47,9 +47,12 @@ STATIC_CONSTEXPR MILLISECONDS STREAM_FLUSH_INTERVAL{ 50 };
 STATIC_CONSTEXPR uint64 FLIGHT_RING_CAPACITY{ 16384 };
 
 SHARED_MUTEX traceLock;
+SHARED_MUTEX logFileLock;
 COND_VARIABLE writerWakeCV;
 COND_VARIABLE writerSpaceCV;
 HANDLE traceFile = INVALID_HANDLE_VALUE;
+HANDLE logFile = INVALID_HANDLE_VALUE;
+bool logFileOpenFailed{};
 ATOMIC_BOOL recording{};
 ATOMIC<ERuntimeTraceMode> activeMode{ ERuntimeTraceMode::Off };
 ATOMIC_UINT64 lastObject{};
@@ -164,7 +167,7 @@ private:
     HANDLE _Handle{ INVALID_HANDLE_VALUE };
 };
 
-HANDLE CreateTraceFile(uint64 runID, DWORD pid, DWORD& error)
+HANDLE CreateArtifactFile(uint64 runID, DWORD pid, const wchar_t* extension, DWORD& error)
 {
     wchar_t moduleName[32768]{};
     const DWORD length = GetModuleFileNameW(nullptr, moduleName, static_cast<DWORD>(std::size(moduleName)));
@@ -201,8 +204,8 @@ HANDLE CreateTraceFile(uint64 runID, DWORD pid, DWORD& error)
     FTraceDirectory traceDirectory;
     if (!traceDirectory.Open(directory, error))
         return INVALID_HANDLE_VALUE;
-    wchar_t name[56]{};
-    swprintf_s(name, L"%llu-%lu.cvtrace", runID, pid);
+    wchar_t name[64]{};
+    swprintf_s(name, L"%llu-%lu.%ls", runID, pid, extension);
     const auto path = directory / name;
     const HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
         CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
@@ -215,7 +218,7 @@ HANDLE OpenAndWriteHeader(uint64 runID, DWORD pid, DWORD& openError) noexcept
 {
     HANDLE file = INVALID_HANDLE_VALUE;
     try {
-        file = CreateTraceFile(runID, pid, openError);
+        file = CreateArtifactFile(runID, pid, L"cvtrace", openError);
     }
     catch (const std::filesystem::filesystem_error& error) {
         openError = static_cast<DWORD>(error.code().value());
@@ -344,9 +347,6 @@ uint64 Publish(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite site, u
 
 FRuntimeTraceRun::FRuntimeTraceRun(ERuntimeTraceMode mode) noexcept
 {
-    if (mode == ERuntimeTraceMode::Off)
-        return;
-
     const DWORD pid = GetCurrentProcessId();
     FILETIME created{}, exited{}, kernel{}, user{};
     if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
@@ -354,6 +354,17 @@ FRuntimeTraceRun::FRuntimeTraceRun(ERuntimeTraceMode mode) noexcept
         return;
     }
     const uint64 runID = FileTimeValue(created);
+
+    {
+        EXCLUSIVE_LOCK_GUARD logGuard{ logFileLock };
+        activeRunID = runID;
+        activeProcessID = pid;
+        logFileOpenFailed = false;
+    }
+    _OwnsSession = true;
+
+    if (mode == ERuntimeTraceMode::Off)
+        return;
 
     if (mode == ERuntimeTraceMode::FlightRecorder) {
         UQPTR<FTraceRecord[]> ring;
@@ -436,7 +447,18 @@ FRuntimeTraceRun::~FRuntimeTraceRun()
     if (!_OwnsSession)
         return;
 
+    {
+        EXCLUSIVE_LOCK_GUARD logGuard{ logFileLock };
+        if (logFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(logFile);
+            logFile = INVALID_HANDLE_VALUE;
+        }
+        logFileOpenFailed = false;
+    }
+
     const ERuntimeTraceMode mode = activeMode.load(std::memory_order_acquire);
+    if (mode == ERuntimeTraceMode::Off)
+        return;
     if (mode == ERuntimeTraceMode::FlightRecorder) {
         EXCLUSIVE_LOCK_GUARD guard{ traceLock };
         recording.store(false, std::memory_order_release);
@@ -567,6 +589,66 @@ bool TriggerRuntimeTraceDump() noexcept
 ERuntimeTraceMode GetRuntimeTraceMode() noexcept
 {
     return activeMode.load(std::memory_order_acquire);
+}
+
+uint64 GetCurrentRuntimeTraceSeq() noexcept
+{
+    return currentScope;
+}
+
+uint64 GetCurrentRuntimeTraceObject() noexcept
+{
+    return currentObject;
+}
+
+uint32 GetCurrentRuntimeTraceThreadID() noexcept
+{
+    return static_cast<uint32>(GetCurrentThreadId());
+}
+
+bool AppendRuntimeLogBatch(STRINGVIEW bytes) noexcept
+{
+    if (bytes.empty())
+        return true;
+
+    const DWORD savedError = GetLastError();
+    bool ok = false;
+    {
+        EXCLUSIVE_LOCK_GUARD guard{ logFileLock };
+        if (logFile == INVALID_HANDLE_VALUE) {
+            if (!logFileOpenFailed && activeRunID != 0 && activeProcessID != 0) {
+                DWORD openError{};
+                try {
+                    logFile = CreateArtifactFile(activeRunID, activeProcessID, L"cvlog", openError);
+                }
+                catch (...) {
+                    logFile = INVALID_HANDLE_VALUE;
+                }
+                if (logFile == INVALID_HANDLE_VALUE)
+                    logFileOpenFailed = true;
+            }
+        }
+
+        if (logFile != INVALID_HANDLE_VALUE) {
+            const uint8* cursor = reinterpret_cast<const uint8*>(bytes.data());
+            uint64 remaining = static_cast<uint64>(bytes.size());
+            ok = true;
+            while (remaining > 0) {
+                const DWORD chunk = static_cast<DWORD>(remaining > 0x40000000ULL ? 0x40000000ULL : remaining);
+                if (!WriteBytes(logFile, cursor, chunk)) {
+                    CloseHandle(logFile);
+                    logFile = INVALID_HANDLE_VALUE;
+                    logFileOpenFailed = true;
+                    ok = false;
+                    break;
+                }
+                cursor += chunk;
+                remaining -= chunk;
+            }
+        }
+    }
+    SetLastError(savedError);
+    return ok;
 }
 
 FRuntimeTraceScope::FRuntimeTraceScope(uint64 object, FRuntimeTraceSite site) noexcept

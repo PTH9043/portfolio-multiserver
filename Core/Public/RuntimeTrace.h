@@ -63,6 +63,12 @@ CORE_TRACE_API uint64 RecordRuntimeTrace(ERuntimeTraceEvent kind, uint64 object,
 // FlightRecorder 모드에서는 링버퍼를 .cvtrace로 덤프하고, AsyncStream 모드에서는 대기 배치를 즉시 플러시한다.
 CORE_TRACE_API bool TriggerRuntimeTraceDump() noexcept;
 CORE_TRACE_API ERuntimeTraceMode GetRuntimeTraceMode() noexcept;
+// 현재 스레드의 활성 계측 순번·객체 ID·OS 스레드 ID를 돌려준다.
+CORE_TRACE_API uint64 GetCurrentRuntimeTraceSeq() noexcept;
+CORE_TRACE_API uint64 GetCurrentRuntimeTraceObject() noexcept;
+CORE_TRACE_API uint32 GetCurrentRuntimeTraceThreadID() noexcept;
+// ULogger 배치 로그(JSONL)를 현재 실행의 ChangeViewerTrace/<runId>-<pid>.cvlog에 기록한다.
+CORE_TRACE_API bool AppendRuntimeLogBatch(STRINGVIEW bytes) noexcept;
 
 class CORE_TRACE_API FRuntimeTraceScope final {
 public:
@@ -84,6 +90,10 @@ inline FRuntimeTraceID::FRuntimeTraceID(const FRuntimeTraceID&) noexcept : FRunt
 inline uint64 RecordRuntimeTrace(ERuntimeTraceEvent, uint64, FRuntimeTraceSite) noexcept { return 0; }
 inline bool TriggerRuntimeTraceDump() noexcept { return false; }
 inline ERuntimeTraceMode GetRuntimeTraceMode() noexcept { return ERuntimeTraceMode::Off; }
+inline uint64 GetCurrentRuntimeTraceSeq() noexcept { return 0; }
+inline uint64 GetCurrentRuntimeTraceObject() noexcept { return 0; }
+inline uint32 GetCurrentRuntimeTraceThreadID() noexcept { return 0; }
+inline bool AppendRuntimeLogBatch(STRINGVIEW) noexcept { return false; }
 inline FRuntimeTraceScope::FRuntimeTraceScope(uint64, FRuntimeTraceSite) noexcept : _PreviousScope{}, _PreviousObject{} {}
 inline FRuntimeTraceScope::FRuntimeTraceScope(uint64, FRuntimeTraceSite, uint64) noexcept : _PreviousScope{}, _PreviousObject{} {}
 inline FRuntimeTraceScope::~FRuntimeTraceScope() = default;
