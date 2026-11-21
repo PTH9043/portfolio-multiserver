@@ -704,6 +704,7 @@ def verify_heartbeat_and_idle_timeout(exe_path: Path, main_port: int, trace_mode
         str(idle_port),
         f"--trace={trace_mode}",
         "--idle-timeout-ms=350",
+        "--db=off",
     ]
     idle_proc = subprocess.Popen(
         idle_cmd,
@@ -827,7 +828,7 @@ def main() -> int:
         return 1
 
     port = find_free_port()
-    cmd = [str(exe_path), str(args.workers), str(port), f"--trace={args.trace}"]
+    cmd = [str(exe_path), str(args.workers), str(port), f"--trace={args.trace}", "--db=off"]
     print(f"=== MultiServer E2E Verify ===")
     print(f"EXE   : {exe_path}")
     print(f"CMD   : {' '.join(cmd)}")

@@ -25,6 +25,10 @@ STATIC_CONSTEXPR Core::ARRAY<FFixedRoomSpec, FIXED_ROOM_COUNT> FIXED_GAME_ROOMS{
 	{ 4, "거래" },
 }};
 
+STATIC_CONSTEXPR Core::uint64 USERNAME_MIN_CHARS{ 4 };
+STATIC_CONSTEXPR Core::uint64 USERNAME_MAX_CHARS{ 20 };
+STATIC_CONSTEXPR Core::uint64 PASSWORD_MIN_CHARS{ 6 };
+STATIC_CONSTEXPR Core::uint64 PASSWORD_MAX_CHARS{ 64 };
 STATIC_CONSTEXPR Core::uint64 NICKNAME_MIN_CHARS{ 2 };
 STATIC_CONSTEXPR Core::uint64 NICKNAME_MAX_CHARS{ 12 };
 // 완성형 한글(U+AC00..U+D7A3)은 UTF-8 3바이트이므로 12자 최대 36바이트다.
@@ -49,14 +53,26 @@ constexpr Core::uint64 ProtobufStringFieldMaxBytes(Core::uint64 maxPayloadBytes)
 }
 
 // 패킷별 직렬화 상한이 헤더를 제외한 최대 본문 크기(PACKET_MAX_BODY_SIZE) 안에 들어오는지 컴파일 시점에 검증한다.
-STATIC_CONSTEXPR Core::uint64 CS_LOGIN_MAX_BYTES{ ProtobufStringFieldMaxBytes(NICKNAME_MAX_UTF8_BYTES) };
+STATIC_CONSTEXPR Core::uint64 CS_LOGIN_MAX_BYTES{
+	ProtobufStringFieldMaxBytes(NICKNAME_MAX_UTF8_BYTES)
+	+ ProtobufStringFieldMaxBytes(USERNAME_MAX_CHARS)
+	+ ProtobufStringFieldMaxBytes(PASSWORD_MAX_CHARS)
+};
+STATIC_CONSTEXPR Core::uint64 CS_REGISTER_MAX_BYTES{
+	ProtobufStringFieldMaxBytes(USERNAME_MAX_CHARS)
+	+ ProtobufStringFieldMaxBytes(PASSWORD_MAX_CHARS)
+	+ ProtobufStringFieldMaxBytes(NICKNAME_MAX_UTF8_BYTES)
+};
 STATIC_CONSTEXPR Core::uint64 CS_CHAT_MAX_BYTES{ ProtobufStringFieldMaxBytes(CHAT_MAX_UTF8_BYTES) };
 STATIC_CONSTEXPR Core::uint64 CS_ROOM_USERS_MAX_BYTES{ PROTOBUF_UINT32_FIELD_MAX_BYTES };
 STATIC_CONSTEXPR Core::uint64 CS_JOIN_ROOM_MAX_BYTES{ PROTOBUF_UINT32_FIELD_MAX_BYTES };
 STATIC_CONSTEXPR Core::uint64 CS_PING_MAX_BYTES{ PROTOBUF_UINT64_FIELD_MAX_BYTES };
 STATIC_CONSTEXPR Core::uint64 SC_LOGIN_RESULT_MAX_BYTES{
-	PROTOBUF_ENUM_FIELD_MAX_BYTES + (PROTOBUF_UINT32_FIELD_MAX_BYTES * 2)
+	PROTOBUF_ENUM_FIELD_MAX_BYTES
+	+ (PROTOBUF_UINT32_FIELD_MAX_BYTES * 2)
+	+ ProtobufStringFieldMaxBytes(NICKNAME_MAX_UTF8_BYTES)
 };
+STATIC_CONSTEXPR Core::uint64 SC_REGISTER_RESULT_MAX_BYTES{ PROTOBUF_ENUM_FIELD_MAX_BYTES };
 STATIC_CONSTEXPR Core::uint64 SC_ROOM_USER_COUNT_MAX_BYTES{ PROTOBUF_UINT32_FIELD_MAX_BYTES };
 STATIC_CONSTEXPR Core::uint64 SC_CHAT_MAX_BYTES{
 	ProtobufStringFieldMaxBytes(NICKNAME_MAX_UTF8_BYTES) + ProtobufStringFieldMaxBytes(CHAT_MAX_UTF8_BYTES)
@@ -77,11 +93,13 @@ STATIC_CONSTEXPR Core::uint64 SC_JOIN_ROOM_RESULT_MAX_BYTES{
 STATIC_CONSTEXPR Core::uint64 SC_PONG_MAX_BYTES{ PROTOBUF_UINT64_FIELD_MAX_BYTES };
 
 static_assert(CS_LOGIN_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSLogin exceeds PACKET_MAX_BODY_SIZE");
+static_assert(CS_REGISTER_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSRegister exceeds PACKET_MAX_BODY_SIZE");
 static_assert(CS_CHAT_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSChat exceeds PACKET_MAX_BODY_SIZE");
 static_assert(CS_ROOM_USERS_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSRoomUsers exceeds PACKET_MAX_BODY_SIZE");
 static_assert(CS_JOIN_ROOM_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSJoinRoom exceeds PACKET_MAX_BODY_SIZE");
 static_assert(CS_PING_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "CSPing exceeds PACKET_MAX_BODY_SIZE");
 static_assert(SC_LOGIN_RESULT_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "SCLoginResult exceeds PACKET_MAX_BODY_SIZE");
+static_assert(SC_REGISTER_RESULT_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "SCRegisterResult exceeds PACKET_MAX_BODY_SIZE");
 static_assert(SC_ROOM_USER_COUNT_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "SCRoomUserCount exceeds PACKET_MAX_BODY_SIZE");
 static_assert(SC_CHAT_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "SCChat exceeds PACKET_MAX_BODY_SIZE");
 static_assert(SC_ROOM_USERS_MAX_BYTES <= Core::PACKET_MAX_BODY_SIZE, "SCRoomUsers exceeds PACKET_MAX_BODY_SIZE");
@@ -168,6 +186,38 @@ inline bool IsAllowedNicknameCodePoint(Core::uint32 codePoint) noexcept
 	if (codePoint >= static_cast<Core::uint32>('0') && codePoint <= static_cast<Core::uint32>('9'))
 		return true;
 	return false;
+}
+
+// 아이디 규칙: ASCII 영문·숫자·밑줄(_) 4~20자.
+inline bool IsValidUsername(Core::STRINGVIEW username) noexcept
+{
+	if (username.size() < USERNAME_MIN_CHARS || username.size() > USERNAME_MAX_CHARS)
+		return false;
+
+	for (const char ch : username) {
+		const bool ok =
+			(ch >= 'A' && ch <= 'Z') ||
+			(ch >= 'a' && ch <= 'z') ||
+			(ch >= '0' && ch <= '9') ||
+			ch == '_';
+		if (!ok)
+			return false;
+	}
+	return true;
+}
+
+// 비밀번호 규칙: ASCII 출력 가능 문자(0x21..0x7E) 6~64자(공백·제어문자 불가).
+inline bool IsValidPassword(Core::STRINGVIEW password) noexcept
+{
+	if (password.size() < PASSWORD_MIN_CHARS || password.size() > PASSWORD_MAX_CHARS)
+		return false;
+
+	for (const char ch : password) {
+		const Core::uint8 byte = static_cast<Core::uint8>(ch);
+		if (byte < 0x21u || byte > 0x7Eu)
+			return false;
+	}
+	return true;
 }
 
 // 닉네임 규칙: UTF-8 2~12자, 완성형 한글·영문·숫자만 허용(공백·특수문자 불가).

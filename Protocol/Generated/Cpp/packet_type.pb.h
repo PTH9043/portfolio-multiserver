@@ -79,6 +79,7 @@ enum ECSPacket : int {
   CS_ROOM_LIST = 4,
   CS_JOIN_ROOM = 5,
   CS_PING = 6,
+  CS_REGISTER = 7,
   ECSPacket_INT_MIN_SENTINEL_DO_NOT_USE_ =
       ::std::numeric_limits<::int32_t>::min(),
   ECSPacket_INT_MAX_SENTINEL_DO_NOT_USE_ =
@@ -89,11 +90,11 @@ extern const uint32_t ECSPacket_internal_data_[];
 inline constexpr ECSPacket ECSPacket_MIN =
     static_cast<ECSPacket>(0);
 inline constexpr ECSPacket ECSPacket_MAX =
-    static_cast<ECSPacket>(6);
+    static_cast<ECSPacket>(7);
 inline bool ECSPacket_IsValid(int value) {
-  return 0 <= value && value <= 6;
+  return 0 <= value && value <= 7;
 }
-inline constexpr int ECSPacket_ARRAYSIZE = 6 + 1;
+inline constexpr int ECSPacket_ARRAYSIZE = 7 + 1;
 const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ECSPacket_descriptor();
 template <typename T>
 const ::std::string& ECSPacket_Name(T value) {
@@ -104,7 +105,7 @@ const ::std::string& ECSPacket_Name(T value) {
 }
 template <>
 inline const ::std::string& ECSPacket_Name(ECSPacket value) {
-  return ::google::protobuf::internal::NameOfDenseEnum<ECSPacket_descriptor, 0, 6>(
+  return ::google::protobuf::internal::NameOfDenseEnum<ECSPacket_descriptor, 0, 7>(
       static_cast<int>(value));
 }
 inline bool ECSPacket_Parse(
@@ -121,6 +122,7 @@ enum ESCPacket : int {
   SC_ROOM_LIST = 5,
   SC_JOIN_ROOM_RESULT = 6,
   SC_PONG = 7,
+  SC_REGISTER_RESULT = 8,
   ESCPacket_INT_MIN_SENTINEL_DO_NOT_USE_ =
       ::std::numeric_limits<::int32_t>::min(),
   ESCPacket_INT_MAX_SENTINEL_DO_NOT_USE_ =
@@ -131,11 +133,11 @@ extern const uint32_t ESCPacket_internal_data_[];
 inline constexpr ESCPacket ESCPacket_MIN =
     static_cast<ESCPacket>(0);
 inline constexpr ESCPacket ESCPacket_MAX =
-    static_cast<ESCPacket>(7);
+    static_cast<ESCPacket>(8);
 inline bool ESCPacket_IsValid(int value) {
-  return 0 <= value && value <= 7;
+  return 0 <= value && value <= 8;
 }
-inline constexpr int ESCPacket_ARRAYSIZE = 7 + 1;
+inline constexpr int ESCPacket_ARRAYSIZE = 8 + 1;
 const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ESCPacket_descriptor();
 template <typename T>
 const ::std::string& ESCPacket_Name(T value) {
@@ -146,7 +148,7 @@ const ::std::string& ESCPacket_Name(T value) {
 }
 template <>
 inline const ::std::string& ESCPacket_Name(ESCPacket value) {
-  return ::google::protobuf::internal::NameOfDenseEnum<ESCPacket_descriptor, 0, 7>(
+  return ::google::protobuf::internal::NameOfDenseEnum<ESCPacket_descriptor, 0, 8>(
       static_cast<int>(value));
 }
 inline bool ESCPacket_Parse(

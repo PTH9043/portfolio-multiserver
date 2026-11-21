@@ -57,14 +57,24 @@ namespace multiplayer {
 namespace protocol {
 enum ELoginResult : int;
 extern const uint32_t ELoginResult_internal_data_[];
+enum ERegisterResult : int;
+extern const uint32_t ERegisterResult_internal_data_[];
 class CSLogin;
 struct CSLoginDefaultTypeInternal;
 extern CSLoginDefaultTypeInternal _CSLogin_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull CSLogin_class_data_;
+class CSRegister;
+struct CSRegisterDefaultTypeInternal;
+extern CSRegisterDefaultTypeInternal _CSRegister_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull CSRegister_class_data_;
 class SCLoginResult;
 struct SCLoginResultDefaultTypeInternal;
 extern SCLoginResultDefaultTypeInternal _SCLoginResult_default_instance_;
 extern const ::google::protobuf::internal::ClassDataFull SCLoginResult_class_data_;
+class SCRegisterResult;
+struct SCRegisterResultDefaultTypeInternal;
+extern SCRegisterResultDefaultTypeInternal _SCRegisterResult_default_instance_;
+extern const ::google::protobuf::internal::ClassDataFull SCRegisterResult_class_data_;
 }  // namespace protocol
 }  // namespace multiplayer
 namespace google {
@@ -72,6 +82,9 @@ namespace protobuf {
 template <>
 internal::EnumTraitsT<::multiplayer::protocol::ELoginResult_internal_data_>
     internal::EnumTraitsImpl::value<::multiplayer::protocol::ELoginResult>;
+template <>
+internal::EnumTraitsT<::multiplayer::protocol::ERegisterResult_internal_data_>
+    internal::EnumTraitsImpl::value<::multiplayer::protocol::ERegisterResult>;
 }  // namespace protobuf
 }  // namespace google
 
@@ -84,6 +97,9 @@ enum ELoginResult : int {
   LOGIN_RESULT_DUPLICATE_NICKNAME = 3,
   LOGIN_RESULT_ALREADY_LOGGED_IN = 4,
   LOGIN_RESULT_ROOM_FULL = 5,
+  LOGIN_RESULT_INVALID_CREDENTIALS = 6,
+  LOGIN_RESULT_DB_ERROR = 7,
+  LOGIN_RESULT_ALREADY_ONLINE = 8,
   ELoginResult_INT_MIN_SENTINEL_DO_NOT_USE_ =
       ::std::numeric_limits<::int32_t>::min(),
   ELoginResult_INT_MAX_SENTINEL_DO_NOT_USE_ =
@@ -94,11 +110,11 @@ extern const uint32_t ELoginResult_internal_data_[];
 inline constexpr ELoginResult ELoginResult_MIN =
     static_cast<ELoginResult>(0);
 inline constexpr ELoginResult ELoginResult_MAX =
-    static_cast<ELoginResult>(5);
+    static_cast<ELoginResult>(8);
 inline bool ELoginResult_IsValid(int value) {
-  return 0 <= value && value <= 5;
+  return 0 <= value && value <= 8;
 }
-inline constexpr int ELoginResult_ARRAYSIZE = 5 + 1;
+inline constexpr int ELoginResult_ARRAYSIZE = 8 + 1;
 const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ELoginResult_descriptor();
 template <typename T>
 const ::std::string& ELoginResult_Name(T value) {
@@ -109,7 +125,7 @@ const ::std::string& ELoginResult_Name(T value) {
 }
 template <>
 inline const ::std::string& ELoginResult_Name(ELoginResult value) {
-  return ::google::protobuf::internal::NameOfDenseEnum<ELoginResult_descriptor, 0, 5>(
+  return ::google::protobuf::internal::NameOfDenseEnum<ELoginResult_descriptor, 0, 8>(
       static_cast<int>(value));
 }
 inline bool ELoginResult_Parse(
@@ -117,10 +133,242 @@ inline bool ELoginResult_Parse(
   return ::google::protobuf::internal::ParseNamedEnum<ELoginResult>(ELoginResult_descriptor(), name,
                                            value);
 }
+enum ERegisterResult : int {
+  REGISTER_RESULT_NONE = 0,
+  REGISTER_RESULT_SUCCESS = 1,
+  REGISTER_RESULT_INVALID_USERNAME = 2,
+  REGISTER_RESULT_INVALID_PASSWORD = 3,
+  REGISTER_RESULT_INVALID_NICKNAME = 4,
+  REGISTER_RESULT_DUPLICATE_USERNAME = 5,
+  REGISTER_RESULT_DUPLICATE_NICKNAME = 6,
+  REGISTER_RESULT_DB_ERROR = 7,
+  ERegisterResult_INT_MIN_SENTINEL_DO_NOT_USE_ =
+      ::std::numeric_limits<::int32_t>::min(),
+  ERegisterResult_INT_MAX_SENTINEL_DO_NOT_USE_ =
+      ::std::numeric_limits<::int32_t>::max(),
+};
+
+extern const uint32_t ERegisterResult_internal_data_[];
+inline constexpr ERegisterResult ERegisterResult_MIN =
+    static_cast<ERegisterResult>(0);
+inline constexpr ERegisterResult ERegisterResult_MAX =
+    static_cast<ERegisterResult>(7);
+inline bool ERegisterResult_IsValid(int value) {
+  return 0 <= value && value <= 7;
+}
+inline constexpr int ERegisterResult_ARRAYSIZE = 7 + 1;
+const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ERegisterResult_descriptor();
+template <typename T>
+const ::std::string& ERegisterResult_Name(T value) {
+  static_assert(::std::is_same<T, ERegisterResult>::value ||
+                    ::std::is_integral<T>::value,
+                "Incorrect type passed to ERegisterResult_Name().");
+  return ERegisterResult_Name(static_cast<ERegisterResult>(value));
+}
+template <>
+inline const ::std::string& ERegisterResult_Name(ERegisterResult value) {
+  return ::google::protobuf::internal::NameOfDenseEnum<ERegisterResult_descriptor, 0, 7>(
+      static_cast<int>(value));
+}
+inline bool ERegisterResult_Parse(
+    ::absl::string_view name, ERegisterResult* PROTOBUF_NONNULL value) {
+  return ::google::protobuf::internal::ParseNamedEnum<ERegisterResult>(ERegisterResult_descriptor(), name,
+                                           value);
+}
 
 // ===================================================================
 
 
+// -------------------------------------------------------------------
+
+class SCRegisterResult final : public ::google::protobuf::Message
+/* @@protoc_insertion_point(class_definition:multiplayer.protocol.SCRegisterResult) */ {
+ public:
+  inline SCRegisterResult() : SCRegisterResult(nullptr) {}
+  ~SCRegisterResult() PROTOBUF_FINAL;
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(SCRegisterResult* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(SCRegisterResult));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR SCRegisterResult(::google::protobuf::internal::ConstantInitialized);
+
+  inline SCRegisterResult(const SCRegisterResult& from) : SCRegisterResult(nullptr, from) {}
+  inline SCRegisterResult(SCRegisterResult&& from) noexcept
+      : SCRegisterResult(nullptr, ::std::move(from)) {}
+  inline SCRegisterResult& operator=(const SCRegisterResult& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline SCRegisterResult& operator=(SCRegisterResult&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const SCRegisterResult& default_instance() {
+    return *reinterpret_cast<const SCRegisterResult*>(
+        &_SCRegisterResult_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 3;
+  friend void swap(SCRegisterResult& a, SCRegisterResult& b) { a.Swap(&b); }
+  inline void Swap(SCRegisterResult* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(SCRegisterResult* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  SCRegisterResult* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::Message::DefaultConstruct<SCRegisterResult>(arena);
+  }
+  using ::google::protobuf::Message::CopyFrom;
+  void CopyFrom(const SCRegisterResult& from);
+  using ::google::protobuf::Message::MergeFrom;
+  void MergeFrom(const SCRegisterResult& from) { SCRegisterResult::MergeImpl(*this, from); }
+
+  private:
+  static void MergeImpl(::google::protobuf::MessageLite& to_msg,
+                        const ::google::protobuf::MessageLite& from_msg);
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+  ABSL_ATTRIBUTE_REINITIALIZES void Clear() PROTOBUF_FINAL;
+  #if defined(PROTOBUF_CUSTOM_VTABLE)
+  private:
+  static ::size_t ByteSizeLong(const ::google::protobuf::MessageLite& msg);
+  static ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      const ::google::protobuf::MessageLite& msg, ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream);
+
+  public:
+  ::size_t ByteSizeLong() const { return ByteSizeLong(*this); }
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const {
+    return _InternalSerialize(*this, target, stream);
+  }
+  #else   // PROTOBUF_CUSTOM_VTABLE
+  ::size_t ByteSizeLong() const final;
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const final;
+  #endif  // PROTOBUF_CUSTOM_VTABLE
+  int GetCachedSize() const { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static void SharedDtor(MessageLite& self);
+  void InternalSwap(SCRegisterResult* PROTOBUF_NONNULL other);
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "multiplayer.protocol.SCRegisterResult"; }
+
+  explicit SCRegisterResult(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  SCRegisterResult(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const SCRegisterResult& from);
+  SCRegisterResult(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, SCRegisterResult&& from) noexcept
+      : SCRegisterResult(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  enum : int {
+    kResultFieldNumber = 1,
+  };
+  // .multiplayer.protocol.ERegisterResult result = 1;
+  void clear_result() ;
+  ::multiplayer::protocol::ERegisterResult result() const;
+  void set_result(::multiplayer::protocol::ERegisterResult value);
+
+  private:
+  ::multiplayer::protocol::ERegisterResult _internal_result() const;
+  void _internal_set_result(::multiplayer::protocol::ERegisterResult value);
+
+  public:
+  // @@protoc_insertion_point(class_scope:multiplayer.protocol.SCRegisterResult)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<0, 1,
+                                   0, 0,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  struct Impl_ {
+    inline explicit constexpr Impl_(::google::protobuf::internal::ConstantInitialized) noexcept;
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const Impl_& from,
+        const SCRegisterResult& from_msg);
+    ::google::protobuf::internal::HasBits<1> _has_bits_;
+    ::google::protobuf::internal::CachedSize _cached_size_;
+    int result_;
+    PROTOBUF_TSAN_DECLARE_MEMBER
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_login_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull SCRegisterResult_class_data_;
 // -------------------------------------------------------------------
 
 class SCLoginResult final : public ::google::protobuf::Message
@@ -265,10 +513,26 @@ class SCLoginResult final : public ::google::protobuf::Message
 
   // accessors -------------------------------------------------------
   enum : int {
+    kNicknameFieldNumber = 4,
     kResultFieldNumber = 1,
     kUserCountFieldNumber = 2,
     kRoomIdFieldNumber = 3,
   };
+  // string nickname = 4;
+  void clear_nickname() ;
+  const ::std::string& nickname() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_nickname(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_nickname();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_nickname();
+  void set_allocated_nickname(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_nickname() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_nickname(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_nickname();
+
+  public:
   // .multiplayer.protocol.ELoginResult result = 1;
   void clear_result() ;
   ::multiplayer::protocol::ELoginResult result() const;
@@ -303,8 +567,8 @@ class SCLoginResult final : public ::google::protobuf::Message
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<2, 3,
-                                   0, 0,
+  static const ::google::protobuf::internal::TcParseTable<2, 4,
+                                   0, 51,
                                    2>
       _table_;
 
@@ -325,6 +589,7 @@ class SCLoginResult final : public ::google::protobuf::Message
         const SCLoginResult& from_msg);
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::internal::ArenaStringPtr nickname_;
     int result_;
     ::uint32_t user_count_;
     ::uint32_t room_id_;
@@ -335,6 +600,235 @@ class SCLoginResult final : public ::google::protobuf::Message
 };
 
 extern const ::google::protobuf::internal::ClassDataFull SCLoginResult_class_data_;
+// -------------------------------------------------------------------
+
+class CSRegister final : public ::google::protobuf::Message
+/* @@protoc_insertion_point(class_definition:multiplayer.protocol.CSRegister) */ {
+ public:
+  inline CSRegister() : CSRegister(nullptr) {}
+  ~CSRegister() PROTOBUF_FINAL;
+
+#if defined(PROTOBUF_CUSTOM_VTABLE)
+  void operator delete(CSRegister* PROTOBUF_NONNULL msg, ::std::destroying_delete_t) {
+    SharedDtor(*msg);
+    ::google::protobuf::internal::SizedDelete(msg, sizeof(CSRegister));
+  }
+#endif
+
+  template <typename = void>
+  explicit PROTOBUF_CONSTEXPR CSRegister(::google::protobuf::internal::ConstantInitialized);
+
+  inline CSRegister(const CSRegister& from) : CSRegister(nullptr, from) {}
+  inline CSRegister(CSRegister&& from) noexcept
+      : CSRegister(nullptr, ::std::move(from)) {}
+  inline CSRegister& operator=(const CSRegister& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline CSRegister& operator=(CSRegister&& from) noexcept {
+    if (this == &from) return *this;
+    if (::google::protobuf::internal::CanMoveWithInternalSwap(GetArena(), from.GetArena())) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::google::protobuf::UnknownFieldSet& unknown_fields() const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.unknown_fields<::google::protobuf::UnknownFieldSet>(::google::protobuf::UnknownFieldSet::default_instance);
+  }
+  inline ::google::protobuf::UnknownFieldSet* PROTOBUF_NONNULL mutable_unknown_fields()
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return _internal_metadata_.mutable_unknown_fields<::google::protobuf::UnknownFieldSet>();
+  }
+
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL descriptor() {
+    return GetDescriptor();
+  }
+  static const ::google::protobuf::Descriptor* PROTOBUF_NONNULL GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::google::protobuf::Reflection* PROTOBUF_NONNULL GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const CSRegister& default_instance() {
+    return *reinterpret_cast<const CSRegister*>(
+        &_CSRegister_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages = 2;
+  friend void swap(CSRegister& a, CSRegister& b) { a.Swap(&b); }
+  inline void Swap(CSRegister* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    if (::google::protobuf::internal::CanUseInternalSwap(GetArena(), other->GetArena())) {
+      InternalSwap(other);
+    } else {
+      ::google::protobuf::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(CSRegister* PROTOBUF_NONNULL other) {
+    if (other == this) return;
+    ABSL_DCHECK(GetArena() == other->GetArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  CSRegister* PROTOBUF_NONNULL New(::google::protobuf::Arena* PROTOBUF_NULLABLE arena = nullptr) const {
+    return ::google::protobuf::Message::DefaultConstruct<CSRegister>(arena);
+  }
+  using ::google::protobuf::Message::CopyFrom;
+  void CopyFrom(const CSRegister& from);
+  using ::google::protobuf::Message::MergeFrom;
+  void MergeFrom(const CSRegister& from) { CSRegister::MergeImpl(*this, from); }
+
+  private:
+  static void MergeImpl(::google::protobuf::MessageLite& to_msg,
+                        const ::google::protobuf::MessageLite& from_msg);
+
+  public:
+  bool IsInitialized() const {
+    return true;
+  }
+  ABSL_ATTRIBUTE_REINITIALIZES void Clear() PROTOBUF_FINAL;
+  #if defined(PROTOBUF_CUSTOM_VTABLE)
+  private:
+  static ::size_t ByteSizeLong(const ::google::protobuf::MessageLite& msg);
+  static ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      const ::google::protobuf::MessageLite& msg, ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream);
+
+  public:
+  ::size_t ByteSizeLong() const { return ByteSizeLong(*this); }
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const {
+    return _InternalSerialize(*this, target, stream);
+  }
+  #else   // PROTOBUF_CUSTOM_VTABLE
+  ::size_t ByteSizeLong() const final;
+  ::uint8_t* PROTOBUF_NONNULL _InternalSerialize(
+      ::uint8_t* PROTOBUF_NONNULL target,
+      ::google::protobuf::io::EpsCopyOutputStream* PROTOBUF_NONNULL stream) const final;
+  #endif  // PROTOBUF_CUSTOM_VTABLE
+  int GetCachedSize() const { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static void SharedDtor(MessageLite& self);
+  void InternalSwap(CSRegister* PROTOBUF_NONNULL other);
+ private:
+  template <typename T>
+  friend ::absl::string_view(::google::protobuf::internal::GetAnyMessageName)();
+  static ::absl::string_view FullMessageName() { return "multiplayer.protocol.CSRegister"; }
+
+  explicit CSRegister(::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  CSRegister(::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const CSRegister& from);
+  CSRegister(
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, CSRegister&& from) noexcept
+      : CSRegister(arena) {
+    *this = ::std::move(from);
+  }
+  const ::google::protobuf::internal::ClassData* PROTOBUF_NONNULL GetClassData() const PROTOBUF_FINAL;
+  static void* PROTOBUF_NONNULL PlacementNew_(
+      const void* PROTOBUF_NONNULL, void* PROTOBUF_NONNULL mem,
+      ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+  static constexpr auto InternalNewImpl_();
+
+ public:
+  static constexpr auto InternalGenerateClassData_();
+
+  ::google::protobuf::Metadata GetMetadata() const;
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+  enum : int {
+    kUsernameFieldNumber = 1,
+    kPasswordFieldNumber = 2,
+    kNicknameFieldNumber = 3,
+  };
+  // string username = 1;
+  void clear_username() ;
+  const ::std::string& username() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_username(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_username();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_username();
+  void set_allocated_username(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_username() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_username(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_username();
+
+  public:
+  // string password = 2;
+  void clear_password() ;
+  const ::std::string& password() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_password(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_password();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_password();
+  void set_allocated_password(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_password() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_password(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_password();
+
+  public:
+  // string nickname = 3;
+  void clear_nickname() ;
+  const ::std::string& nickname() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_nickname(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_nickname();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_nickname();
+  void set_allocated_nickname(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_nickname() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_nickname(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_nickname();
+
+  public:
+  // @@protoc_insertion_point(class_scope:multiplayer.protocol.CSRegister)
+ private:
+  class _Internal;
+  friend class ::google::protobuf::internal::TcParser;
+  static const ::google::protobuf::internal::TcParseTable<2, 3,
+                                   0, 64,
+                                   2>
+      _table_;
+
+  friend class ::google::protobuf::MessageLite;
+  friend class ::google::protobuf::Arena;
+  template <typename T>
+  friend class ::google::protobuf::Arena::InternalHelper;
+  using InternalArenaConstructable_ = void;
+  using DestructorSkippable_ = void;
+  struct Impl_ {
+    inline explicit constexpr Impl_(::google::protobuf::internal::ConstantInitialized) noexcept;
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena);
+    inline explicit Impl_(
+        ::google::protobuf::internal::InternalVisibility visibility,
+        ::google::protobuf::Arena* PROTOBUF_NULLABLE arena, const Impl_& from,
+        const CSRegister& from_msg);
+    ::google::protobuf::internal::HasBits<1> _has_bits_;
+    ::google::protobuf::internal::CachedSize _cached_size_;
+    ::google::protobuf::internal::ArenaStringPtr username_;
+    ::google::protobuf::internal::ArenaStringPtr password_;
+    ::google::protobuf::internal::ArenaStringPtr nickname_;
+    PROTOBUF_TSAN_DECLARE_MEMBER
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_login_2eproto;
+};
+
+extern const ::google::protobuf::internal::ClassDataFull CSRegister_class_data_;
 // -------------------------------------------------------------------
 
 class CSLogin final : public ::google::protobuf::Message
@@ -480,6 +974,8 @@ class CSLogin final : public ::google::protobuf::Message
   // accessors -------------------------------------------------------
   enum : int {
     kNicknameFieldNumber = 1,
+    kUsernameFieldNumber = 2,
+    kPasswordFieldNumber = 3,
   };
   // string nickname = 1;
   void clear_nickname() ;
@@ -496,12 +992,42 @@ class CSLogin final : public ::google::protobuf::Message
   ::std::string* PROTOBUF_NONNULL _internal_mutable_nickname();
 
   public:
+  // string username = 2;
+  void clear_username() ;
+  const ::std::string& username() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_username(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_username();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_username();
+  void set_allocated_username(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_username() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_username(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_username();
+
+  public:
+  // string password = 3;
+  void clear_password() ;
+  const ::std::string& password() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_password(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_password();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_password();
+  void set_allocated_password(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_password() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_password(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_password();
+
+  public:
   // @@protoc_insertion_point(class_scope:multiplayer.protocol.CSLogin)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<0, 1,
-                                   0, 45,
+  static const ::google::protobuf::internal::TcParseTable<2, 3,
+                                   0, 61,
                                    2>
       _table_;
 
@@ -523,6 +1049,8 @@ class CSLogin final : public ::google::protobuf::Message
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::internal::ArenaStringPtr nickname_;
+    ::google::protobuf::internal::ArenaStringPtr username_;
+    ::google::protobuf::internal::ArenaStringPtr password_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -612,6 +1140,136 @@ inline void CSLogin::set_allocated_nickname(::std::string* PROTOBUF_NULLABLE val
   // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSLogin.nickname)
 }
 
+// string username = 2;
+inline void CSLogin::clear_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.username_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& CSLogin::username() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.CSLogin.username)
+  return _internal_username();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void CSLogin::set_username(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.username_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.CSLogin.username)
+}
+inline ::std::string* PROTOBUF_NONNULL CSLogin::mutable_username()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_username();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.CSLogin.username)
+  return _s;
+}
+inline const ::std::string& CSLogin::_internal_username() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.username_.Get();
+}
+inline void CSLogin::_internal_set_username(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.username_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL CSLogin::_internal_mutable_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.username_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE CSLogin::release_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.CSLogin.username)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.username_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.username_.Set("", GetArena());
+  }
+  return released;
+}
+inline void CSLogin::set_allocated_username(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.username_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.username_.IsDefault()) {
+    _impl_.username_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSLogin.username)
+}
+
+// string password = 3;
+inline void CSLogin::clear_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.password_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline const ::std::string& CSLogin::password() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.CSLogin.password)
+  return _internal_password();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void CSLogin::set_password(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  _impl_.password_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.CSLogin.password)
+}
+inline ::std::string* PROTOBUF_NONNULL CSLogin::mutable_password()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ::std::string* _s = _internal_mutable_password();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.CSLogin.password)
+  return _s;
+}
+inline const ::std::string& CSLogin::_internal_password() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.password_.Get();
+}
+inline void CSLogin::_internal_set_password(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.password_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL CSLogin::_internal_mutable_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.password_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE CSLogin::release_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.CSLogin.password)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  auto* released = _impl_.password_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.password_.Set("", GetArena());
+  }
+  return released;
+}
+inline void CSLogin::set_allocated_password(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  }
+  _impl_.password_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.password_.IsDefault()) {
+    _impl_.password_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSLogin.password)
+}
+
 // -------------------------------------------------------------------
 
 // SCLoginResult
@@ -621,7 +1279,7 @@ inline void SCLoginResult::clear_result() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.result_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000001U);
+                  0x00000002U);
 }
 inline ::multiplayer::protocol::ELoginResult SCLoginResult::result() const {
   // @@protoc_insertion_point(field_get:multiplayer.protocol.SCLoginResult.result)
@@ -629,7 +1287,7 @@ inline ::multiplayer::protocol::ELoginResult SCLoginResult::result() const {
 }
 inline void SCLoginResult::set_result(::multiplayer::protocol::ELoginResult value) {
   _internal_set_result(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
   // @@protoc_insertion_point(field_set:multiplayer.protocol.SCLoginResult.result)
 }
 inline ::multiplayer::protocol::ELoginResult SCLoginResult::_internal_result() const {
@@ -646,7 +1304,7 @@ inline void SCLoginResult::clear_user_count() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.user_count_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline ::uint32_t SCLoginResult::user_count() const {
   // @@protoc_insertion_point(field_get:multiplayer.protocol.SCLoginResult.user_count)
@@ -654,7 +1312,7 @@ inline ::uint32_t SCLoginResult::user_count() const {
 }
 inline void SCLoginResult::set_user_count(::uint32_t value) {
   _internal_set_user_count(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   // @@protoc_insertion_point(field_set:multiplayer.protocol.SCLoginResult.user_count)
 }
 inline ::uint32_t SCLoginResult::_internal_user_count() const {
@@ -671,7 +1329,7 @@ inline void SCLoginResult::clear_room_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.room_id_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline ::uint32_t SCLoginResult::room_id() const {
   // @@protoc_insertion_point(field_get:multiplayer.protocol.SCLoginResult.room_id)
@@ -679,7 +1337,7 @@ inline ::uint32_t SCLoginResult::room_id() const {
 }
 inline void SCLoginResult::set_room_id(::uint32_t value) {
   _internal_set_room_id(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   // @@protoc_insertion_point(field_set:multiplayer.protocol.SCLoginResult.room_id)
 }
 inline ::uint32_t SCLoginResult::_internal_room_id() const {
@@ -689,6 +1347,299 @@ inline ::uint32_t SCLoginResult::_internal_room_id() const {
 inline void SCLoginResult::_internal_set_room_id(::uint32_t value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.room_id_ = value;
+}
+
+// string nickname = 4;
+inline void SCLoginResult::clear_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.nickname_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline const ::std::string& SCLoginResult::nickname() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.SCLoginResult.nickname)
+  return _internal_nickname();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void SCLoginResult::set_nickname(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  _impl_.nickname_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.SCLoginResult.nickname)
+}
+inline ::std::string* PROTOBUF_NONNULL SCLoginResult::mutable_nickname()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ::std::string* _s = _internal_mutable_nickname();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.SCLoginResult.nickname)
+  return _s;
+}
+inline const ::std::string& SCLoginResult::_internal_nickname() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.nickname_.Get();
+}
+inline void SCLoginResult::_internal_set_nickname(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.nickname_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL SCLoginResult::_internal_mutable_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.nickname_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE SCLoginResult::release_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.SCLoginResult.nickname)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  auto* released = _impl_.nickname_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.nickname_.Set("", GetArena());
+  }
+  return released;
+}
+inline void SCLoginResult::set_allocated_nickname(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  }
+  _impl_.nickname_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.nickname_.IsDefault()) {
+    _impl_.nickname_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.SCLoginResult.nickname)
+}
+
+// -------------------------------------------------------------------
+
+// CSRegister
+
+// string username = 1;
+inline void CSRegister::clear_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.username_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline const ::std::string& CSRegister::username() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.CSRegister.username)
+  return _internal_username();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void CSRegister::set_username(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  _impl_.username_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.CSRegister.username)
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::mutable_username()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  ::std::string* _s = _internal_mutable_username();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.CSRegister.username)
+  return _s;
+}
+inline const ::std::string& CSRegister::_internal_username() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.username_.Get();
+}
+inline void CSRegister::_internal_set_username(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.username_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::_internal_mutable_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.username_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE CSRegister::release_username() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.CSRegister.username)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000001U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  auto* released = _impl_.username_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.username_.Set("", GetArena());
+  }
+  return released;
+}
+inline void CSRegister::set_allocated_username(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000001U);
+  }
+  _impl_.username_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.username_.IsDefault()) {
+    _impl_.username_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSRegister.username)
+}
+
+// string password = 2;
+inline void CSRegister::clear_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.password_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& CSRegister::password() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.CSRegister.password)
+  return _internal_password();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void CSRegister::set_password(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.password_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.CSRegister.password)
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::mutable_password()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_password();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.CSRegister.password)
+  return _s;
+}
+inline const ::std::string& CSRegister::_internal_password() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.password_.Get();
+}
+inline void CSRegister::_internal_set_password(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.password_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::_internal_mutable_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.password_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE CSRegister::release_password() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.CSRegister.password)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.password_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.password_.Set("", GetArena());
+  }
+  return released;
+}
+inline void CSRegister::set_allocated_password(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.password_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.password_.IsDefault()) {
+    _impl_.password_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSRegister.password)
+}
+
+// string nickname = 3;
+inline void CSRegister::clear_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.nickname_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline const ::std::string& CSRegister::nickname() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.CSRegister.nickname)
+  return _internal_nickname();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void CSRegister::set_nickname(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  _impl_.nickname_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.CSRegister.nickname)
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::mutable_nickname()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ::std::string* _s = _internal_mutable_nickname();
+  // @@protoc_insertion_point(field_mutable:multiplayer.protocol.CSRegister.nickname)
+  return _s;
+}
+inline const ::std::string& CSRegister::_internal_nickname() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.nickname_.Get();
+}
+inline void CSRegister::_internal_set_nickname(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.nickname_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL CSRegister::_internal_mutable_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.nickname_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE CSRegister::release_nickname() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:multiplayer.protocol.CSRegister.nickname)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  auto* released = _impl_.nickname_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.nickname_.Set("", GetArena());
+  }
+  return released;
+}
+inline void CSRegister::set_allocated_nickname(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  }
+  _impl_.nickname_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.nickname_.IsDefault()) {
+    _impl_.nickname_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:multiplayer.protocol.CSRegister.nickname)
+}
+
+// -------------------------------------------------------------------
+
+// SCRegisterResult
+
+// .multiplayer.protocol.ERegisterResult result = 1;
+inline void SCRegisterResult::clear_result() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.result_ = 0;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000001U);
+}
+inline ::multiplayer::protocol::ERegisterResult SCRegisterResult::result() const {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.SCRegisterResult.result)
+  return _internal_result();
+}
+inline void SCRegisterResult::set_result(::multiplayer::protocol::ERegisterResult value) {
+  _internal_set_result(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000001U);
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.SCRegisterResult.result)
+}
+inline ::multiplayer::protocol::ERegisterResult SCRegisterResult::_internal_result() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return static_cast<::multiplayer::protocol::ERegisterResult>(_impl_.result_);
+}
+inline void SCRegisterResult::_internal_set_result(::multiplayer::protocol::ERegisterResult value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.result_ = value;
 }
 
 #ifdef __GNUC__
@@ -708,6 +1659,12 @@ struct is_proto_enum<::multiplayer::protocol::ELoginResult> : std::true_type {};
 template <>
 inline const EnumDescriptor* PROTOBUF_NONNULL GetEnumDescriptor<::multiplayer::protocol::ELoginResult>() {
   return ::multiplayer::protocol::ELoginResult_descriptor();
+}
+template <>
+struct is_proto_enum<::multiplayer::protocol::ERegisterResult> : std::true_type {};
+template <>
+inline const EnumDescriptor* PROTOBUF_NONNULL GetEnumDescriptor<::multiplayer::protocol::ERegisterResult>() {
+  return ::multiplayer::protocol::ERegisterResult_descriptor();
 }
 
 }  // namespace protobuf

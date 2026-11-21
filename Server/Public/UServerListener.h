@@ -6,6 +6,7 @@
 SPACE_H(Server)
 
 class UNicknameRegistry;
+class UDatabaseManager;
 
 // 수락한 소켓으로 UServerSession을 만들고 유휴 타임아웃 설정·UNetworkManager 등록 후 수신을 시작한다.
 class UServerListener final : public Core::UListener {
@@ -13,7 +14,8 @@ public:
 	// context는 UNetworkManager의 io_context여야 한다.
 	explicit UServerListener(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context,
 		Core::SHPTR<UNicknameRegistry> nicknameRegistry = nullptr,
-		Core::MILLISECONDS sessionIdleTimeout = Core::SESSION_DEFAULT_IDLE_TIMEOUT);
+		Core::MILLISECONDS sessionIdleTimeout = Core::SESSION_DEFAULT_IDLE_TIMEOUT,
+		Core::SHPTR<UDatabaseManager> databaseManager = nullptr);
 	virtual ~UServerListener() override;
 
 protected:
@@ -23,6 +25,7 @@ protected:
 
 private:
 	Core::SHPTR<UNicknameRegistry> _NicknameRegistry;
+	Core::SHPTR<UDatabaseManager> _DatabaseManager;
 	Core::MILLISECONDS _SessionIdleTimeout{ Core::SESSION_DEFAULT_IDLE_TIMEOUT };
 };
 

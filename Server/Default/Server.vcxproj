@@ -20,7 +20,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\Public\ChatProtocolLimits.h" />
+    <ClInclude Include="..\Public\FMySqlConnection.h" />
+    <ClInclude Include="..\Public\PasswordHasher.h" />
     <ClInclude Include="..\Public\ServerApp.h" />
+    <ClInclude Include="..\Public\UDatabaseManager.h" />
     <ClInclude Include="..\Public\UServerInput.h" />
     <ClInclude Include="..\Public\UServerListener.h" />
     <ClInclude Include="..\Public\UServerSession.h" />
@@ -28,7 +31,10 @@
     <ClInclude Include="..\Public\UPlayer.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\Private\FMySqlConnection.cpp" />
+    <ClCompile Include="..\Private\PasswordHasher.cpp" />
     <ClCompile Include="..\Private\ServerApp.cpp" />
+    <ClCompile Include="..\Private\UDatabaseManager.cpp" />
     <ClCompile Include="..\Private\UServerInput.cpp" />
     <ClCompile Include="..\Private\UServerListener.cpp" />
     <ClCompile Include="..\Private\UServerSession.cpp" />
@@ -95,6 +101,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros">
     <BoostIncludeDir Condition="'$(BoostIncludeDir)'==''">$(MSBuildThisFileDirectory)..\..\ThirdParty\boost_1_92_0</BoostIncludeDir>
+    <MysqlDir Condition="'$(MysqlDir)'==''">$(MSBuildThisFileDirectory)..\..\ThirdParty\mysql</MysqlDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <OutDir>..\Bin\</OutDir>
@@ -144,7 +151,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);$(MysqlDir)\include\mariadb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -155,8 +162,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libmariadb.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\;$(MysqlDir)\lib\mariadb\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -168,7 +175,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);$(MysqlDir)\include\mariadb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <ProgramDataBaseFileName>$(IntDir)%(Filename).pdb</ProgramDataBaseFileName>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -178,8 +185,8 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libmariadb.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\;$(MysqlDir)\lib\mariadb\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <LargeAddressAware>true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>
@@ -194,7 +201,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\ServerProtocol\; ..\Public\; ..\..\Core\Public\;$(BoostIncludeDir);$(MysqlDir)\include\mariadb;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -205,8 +212,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
-      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libmariadb.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\..\Reference\Librarys\;..\ThirdPartyLib\;$(MysqlDir)\lib\mariadb\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="..\..\Protocol\ServerProtocol.props" />
@@ -217,6 +224,7 @@
     <ItemGroup>
       <CoreRuntime Include="$(ProjectDir)..\..\Core\Bin\debug\CoreD.dll" Condition="'$(Configuration)'=='Debug'" />
       <CoreRuntime Include="$(ProjectDir)..\..\Core\Bin\release\Core.dll" Condition="'$(Configuration)'=='Release'" />
+      <CoreRuntime Include="$(MysqlDir)\lib\mariadb\libmariadb.dll" Condition="Exists('$(MysqlDir)\lib\mariadb\libmariadb.dll')" />
     </ItemGroup>
     <Copy SourceFiles="@(CoreRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
   </Target>

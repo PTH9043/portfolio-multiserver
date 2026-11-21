@@ -1,5 +1,6 @@
 #include "UPlayer.h"
 #include "ChatProtocolLimits.h"
+#include "UDatabaseManager.h"
 #include "UGameRoom.h"
 #include "USession.h"
 #include "UCoreInstance.h"
@@ -23,10 +24,11 @@ namespace Protocol = multiplayer::protocol;
 SPACE_H(Server)
 
 UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info,
-	Core::SHPTR<UNicknameRegistry> nicknameRegistry)
+	Core::SHPTR<UNicknameRegistry> nicknameRegistry, Core::SHPTR<UDatabaseManager> databaseManager)
 	: UCharacter{ std::move(coreInstance) },
 	  _Info{ std::move(info) },
-	  _NicknameRegistry{ std::move(nicknameRegistry) }
+	  _NicknameRegistry{ std::move(nicknameRegistry) },
+	  _DatabaseManager{ std::move(databaseManager) }
 {
 	RUNTIME_TRACE_EVENT(Create, UPlayer, UPlayer, GetRuntimeTraceID());
 }
@@ -34,6 +36,10 @@ UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info
 UPlayer::~UPlayer()
 {
 	ReleaseNicknameOnce();
+	if (_DatabaseManager && _Info.ConnectionLogID != 0
+		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
+		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, _LastRoomID, Core::FString{ "CLEANUP" });
+	}
 	RUNTIME_TRACE_EVENT(Destroy, UPlayer, ~UPlayer, GetRuntimeTraceID());
 }
 
@@ -41,6 +47,8 @@ UPlayer::~UPlayer()
 void UPlayer::SetGameRoom(const Core::SHPTR<UGameRoom>& gameRoom) noexcept
 {
 	_GameRoom = gameRoom;
+	if (gameRoom)
+		_LastRoomID = static_cast<Core::uint32>(gameRoom->GetRoomID());
 }
 
 // 로그인 이후 세션에서 올라온 패킷을 타입별로 분기 처리한다.
@@ -72,7 +80,7 @@ void UPlayer::OnReceivePacket(const Core::FPacketView& packet)
 	}
 }
 
-// 세션 종료 시 전역 닉네임을 즉시 해제하고 소속 방에서 플레이어 퇴장을 요청한다.
+// 세션 종료 시 전역 닉네임을 즉시 해제하고 소속 방 퇴장 및 비동기 DB 로그아웃 이력을 요청한다.
 void UPlayer::OnSessionDisconnected()
 {
 	RUNTIME_TRACE_SCOPE(UPlayer, OnSessionDisconnected, GetRuntimeTraceID());
@@ -80,9 +88,15 @@ void UPlayer::OnSessionDisconnected()
 	_RoomTransferPending = false;
 	ReleaseNicknameOnce();
 	const auto gameRoom = _GameRoom.lock();
+	if (gameRoom)
+		_LastRoomID = static_cast<Core::uint32>(gameRoom->GetRoomID());
 	_GameRoom.reset();
 	if (gameRoom)
 		gameRoom->RequestLeave(ThisShared<UPlayer>());
+	if (_DatabaseManager && _Info.ConnectionLogID != 0
+		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
+		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, _LastRoomID, _DisconnectReason);
+	}
 }
 
 // 패킷 뷰를 Protobuf 메시지로 역직렬화하고 실패 시 연결을 닫는다.
@@ -319,6 +333,7 @@ void UPlayer::OnEnterTransferTargetCompleted(const Core::SHPTR<UGameRoom>& previ
 	if (result == UGameRoom::EEnterResult::Success) {
 		_RoomTransferPending = false;
 		_GameRoom = targetRoom;
+		_LastRoomID = static_cast<Core::uint32>(targetRoom->GetRoomID());
 
 		Protocol::SCJoinRoomResult response;
 		response.set_result(Protocol::JOIN_ROOM_SUCCESS);
@@ -389,6 +404,7 @@ void UPlayer::ReleaseNicknameOnce() noexcept
 void UPlayer::RejectPacket(const Core::uint16 packetType, const Core::STRINGVIEW reason)
 {
 	RUNTIME_TRACE_SCOPE(UPlayer, RejectPacket, GetRuntimeTraceID());
+	_DisconnectReason = Core::FString{ "PROTOCOL_ERROR" };
 	const auto coreInstance = GetCoreInstance();
 	const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
 	if (logger) {

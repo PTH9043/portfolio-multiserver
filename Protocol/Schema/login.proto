@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-// 로그인. 성공하면 서버가 기본 방에 자동으로 입장시킨다.
+// 로그인 및 회원가입. 로그인에 성공하면 서버가 기본 방에 자동으로 입장시킨다.
 package multiplayer.protocol;
 option csharp_namespace = "Multiplayer.Protocol";
 
@@ -8,15 +8,32 @@ option csharp_namespace = "Multiplayer.Protocol";
 enum ELoginResult {
   LOGIN_RESULT_NONE = 0;
   LOGIN_RESULT_SUCCESS = 1;
-  LOGIN_RESULT_INVALID_NICKNAME = 2;    // 닉네임 규칙 위반
-  LOGIN_RESULT_DUPLICATE_NICKNAME = 3;  // 이미 쓰는 닉네임
+  LOGIN_RESULT_INVALID_NICKNAME = 2;    // 닉네임 규칙 위반 (--db=off)
+  LOGIN_RESULT_DUPLICATE_NICKNAME = 3;  // 이미 쓰는 닉네임 (--db=off)
   LOGIN_RESULT_ALREADY_LOGGED_IN = 4;   // 같은 연결에서 두 번 로그인
   LOGIN_RESULT_ROOM_FULL = 5;           // 기본 방 정원 초과
+  LOGIN_RESULT_INVALID_CREDENTIALS = 6; // 아이디 또는 비밀번호 불일치 (--db=mysql)
+  LOGIN_RESULT_DB_ERROR = 7;            // DB 일시 오류 또는 대기열 포화
+  LOGIN_RESULT_ALREADY_ONLINE = 8;      // 동일 계정이 이미 접속 중
 }
 
-// CS_LOGIN
+// 회원가입 판정 결과.
+enum ERegisterResult {
+  REGISTER_RESULT_NONE = 0;
+  REGISTER_RESULT_SUCCESS = 1;
+  REGISTER_RESULT_INVALID_USERNAME = 2;   // 영문·숫자 4~20자 규칙 위반
+  REGISTER_RESULT_INVALID_PASSWORD = 3;   // 6~64자 규칙 위반
+  REGISTER_RESULT_INVALID_NICKNAME = 4;   // 2~12자 한글·영문·숫자 규칙 위반
+  REGISTER_RESULT_DUPLICATE_USERNAME = 5; // 이미 존재하는 아이디
+  REGISTER_RESULT_DUPLICATE_NICKNAME = 6; // 이미 존재하는 닉네임
+  REGISTER_RESULT_DB_ERROR = 7;           // DB 미연결 또는 일시 오류
+}
+
+// CS_LOGIN (--db=off에서는 nickname 사용, --db=mysql에서는 username + password 사용)
 message CSLogin {
   string nickname = 1;
+  string username = 2;
+  string password = 3;
 }
 
 // SC_LOGIN_RESULT
@@ -26,4 +43,18 @@ message SCLoginResult {
   uint32 user_count = 2;
   // 성공했을 때 자동 입장한 기본 방 ID.
   uint32 room_id = 3;
+  // 성공했을 때 확정된 플레이어 닉네임(DB 인증 모드에서 클라이언트에 전달).
+  string nickname = 4;
+}
+
+// CS_REGISTER
+message CSRegister {
+  string username = 1;
+  string password = 2;
+  string nickname = 3;
+}
+
+// SC_REGISTER_RESULT
+message SCRegisterResult {
+  ERegisterResult result = 1;
 }

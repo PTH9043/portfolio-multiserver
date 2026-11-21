@@ -39,20 +39,21 @@ static constexpr ::_pb::Message* PROTOBUF_NONNULL const* PROTOBUF_NULLABLE
 const char descriptor_table_protodef_packet_5ftype_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
     "\n\021packet_type.proto\022\024multiplayer.protoco"
-    "l*w\n\tECSPacket\022\013\n\007CS_NONE\020\000\022\014\n\010CS_LOGIN\020"
-    "\001\022\013\n\007CS_CHAT\020\002\022\021\n\rCS_ROOM_USERS\020\003\022\020\n\014CS_"
-    "ROOM_LIST\020\004\022\020\n\014CS_JOIN_ROOM\020\005\022\013\n\007CS_PING"
-    "\020\006*\235\001\n\tESCPacket\022\013\n\007SC_NONE\020\000\022\023\n\017SC_LOGI"
-    "N_RESULT\020\001\022\013\n\007SC_CHAT\020\002\022\026\n\022SC_ROOM_USER_"
-    "COUNT\020\003\022\021\n\rSC_ROOM_USERS\020\004\022\020\n\014SC_ROOM_LI"
-    "ST\020\005\022\027\n\023SC_JOIN_ROOM_RESULT\020\006\022\013\n\007SC_PONG"
-    "\020\007B\027\252\002\024Multiplayer.Protocolb\006proto3"
+    "l*\210\001\n\tECSPacket\022\013\n\007CS_NONE\020\000\022\014\n\010CS_LOGIN"
+    "\020\001\022\013\n\007CS_CHAT\020\002\022\021\n\rCS_ROOM_USERS\020\003\022\020\n\014CS"
+    "_ROOM_LIST\020\004\022\020\n\014CS_JOIN_ROOM\020\005\022\013\n\007CS_PIN"
+    "G\020\006\022\017\n\013CS_REGISTER\020\007*\265\001\n\tESCPacket\022\013\n\007SC"
+    "_NONE\020\000\022\023\n\017SC_LOGIN_RESULT\020\001\022\013\n\007SC_CHAT\020"
+    "\002\022\026\n\022SC_ROOM_USER_COUNT\020\003\022\021\n\rSC_ROOM_USE"
+    "RS\020\004\022\020\n\014SC_ROOM_LIST\020\005\022\027\n\023SC_JOIN_ROOM_R"
+    "ESULT\020\006\022\013\n\007SC_PONG\020\007\022\026\n\022SC_REGISTER_RESU"
+    "LT\020\010B\027\252\002\024Multiplayer.Protocolb\006proto3"
 };
 static ::absl::once_flag descriptor_table_packet_5ftype_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_packet_5ftype_2eproto = {
     false,
     false,
-    355,
+    397,
     descriptor_table_protodef_packet_5ftype_2eproto,
     "packet_type.proto",
     &descriptor_table_packet_5ftype_2eproto_once,
@@ -72,13 +73,13 @@ const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ECSPacket_descriptor(
   return file_level_enum_descriptors_packet_5ftype_2eproto[0];
 }
 PROTOBUF_CONSTINIT const uint32_t ECSPacket_internal_data_[] = {
-    458752u, 0u, };
+    524288u, 0u, };
 const ::google::protobuf::EnumDescriptor* PROTOBUF_NONNULL ESCPacket_descriptor() {
   ::google::protobuf::internal::AssignDescriptors(&descriptor_table_packet_5ftype_2eproto);
   return file_level_enum_descriptors_packet_5ftype_2eproto[1];
 }
 PROTOBUF_CONSTINIT const uint32_t ESCPacket_internal_data_[] = {
-    524288u, 0u, };
+    589824u, 0u, };
 // @@protoc_insertion_point(namespace_scope)
 }  // namespace protocol
 }  // namespace multiplayer

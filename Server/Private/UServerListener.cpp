@@ -11,9 +11,11 @@
 SPACE_H(Server)
 
 UServerListener::UServerListener(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context,
-	Core::SHPTR<UNicknameRegistry> nicknameRegistry, const Core::MILLISECONDS sessionIdleTimeout)
+	Core::SHPTR<UNicknameRegistry> nicknameRegistry, const Core::MILLISECONDS sessionIdleTimeout,
+	Core::SHPTR<UDatabaseManager> databaseManager)
 	: UListener{ std::move(coreInstance), context },
 	  _NicknameRegistry{ std::move(nicknameRegistry) },
+	  _DatabaseManager{ std::move(databaseManager) },
 	  _SessionIdleTimeout{ sessionIdleTimeout }
 {
 	RUNTIME_TRACE_EVENT(Create, UServerListener, UServerListener, GetRuntimeTraceID());
@@ -33,7 +35,22 @@ void UServerListener::HandleAcceptedSocket(Core::TCPSOCKET socket)
 	if (!networkManager)
 		return;
 
-	const auto session = Core::MakeShared<UServerSession>(coreInstance, std::move(socket), _NicknameRegistry);
+	Core::FString remoteIp{ "127.0.0.1" };
+	{
+		Core::BOOST_ERROR_CODE ec;
+		const auto endpoint = socket.remote_endpoint(ec);
+		if (!ec) {
+			try {
+				const std::string addr = endpoint.address().to_string();
+				remoteIp = Core::FString{ Core::STRINGVIEW{ addr } };
+			}
+			catch (...) {
+			}
+		}
+	}
+
+	const auto session = Core::MakeShared<UServerSession>(coreInstance, std::move(socket),
+		_NicknameRegistry, _DatabaseManager, std::move(remoteIp));
 	session->SetIdleTimeout(_SessionIdleTimeout);
 	// 등록을 먼저 게시해야 수신이 바로 끝나 Close가 게시하는 목록 제거가 등록 뒤에 실행된다.
 	networkManager->RequestAddSession(session);

@@ -6,6 +6,7 @@
 
 namespace multiplayer::protocol {
 class CSLogin;
+class CSRegister;
 class CSChat;
 class CSRoomUsers;
 class CSRoomList;
@@ -16,11 +17,14 @@ class CSPing;
 SPACE_H(Server)
 
 class UNicknameRegistry;
+class UDatabaseManager;
 
 // 플레이어의 공용 식별·프로필 정보 구조체다.
-// 닉네임에 한정하지 않고 추후 계정 ID·등급·상태 등 공용 속성을 확장해 함께 전달·보관한다.
+// 닉네임과 DB 영속 식별자(AccountID·ConnectionLogID)를 함께 보관한다.
 struct FPlayerInfo {
 	Core::FString Nickname;
+	Core::uint64 AccountID{ 0 };
+	Core::uint64 ConnectionLogID{ 0 };
 };
 
 // 플레이어가 조종하는 사물이다.
@@ -30,7 +34,8 @@ public:
 	STATIC_CONSTEXPR Core::uint32 ActorTypeID{ static_cast<Core::uint32>(Core::EActorType::UserStart) };
 
 	explicit UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info,
-		Core::SHPTR<UNicknameRegistry> nicknameRegistry = nullptr);
+		Core::SHPTR<UNicknameRegistry> nicknameRegistry = nullptr,
+		Core::SHPTR<UDatabaseManager> databaseManager = nullptr);
 	virtual ~UPlayer() override;
 	NO_COPY(UPlayer)
 
@@ -81,8 +86,12 @@ private:
 
 	FPlayerInfo _Info;
 	Core::SHPTR<UNicknameRegistry> _NicknameRegistry;
+	Core::SHPTR<UDatabaseManager> _DatabaseManager;
 	Core::ATOMIC_BOOL _NicknameReleased{ false };
+	Core::ATOMIC_BOOL _LogoutRecorded{ false };
 	Core::WKPTR<UGameRoom> _GameRoom;    // 부착된 USession의 strand에서만 접근한다.
+	Core::uint32 _LastRoomID{ 1 };       // 부착된 USession의 strand에서만 접근한다.
+	Core::FString _DisconnectReason{ "NORMAL" }; // 부착된 USession의 strand에서만 접근한다.
 	bool _RoomTransferPending{ false };  // 부착된 USession의 strand에서만 접근한다.
 	bool _Disconnected{ false };         // 부착된 USession의 strand에서만 접근한다.
 };

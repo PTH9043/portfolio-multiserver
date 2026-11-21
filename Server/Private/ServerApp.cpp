@@ -1,5 +1,6 @@
 #include "ServerApp.h"
 #include "ChatProtocolLimits.h"
+#include "UDatabaseManager.h"
 #include "UGameRoom.h"
 #include "UServerListener.h"
 #include "UCoreInstance.h"
@@ -105,7 +106,7 @@ UServerApp::~UServerApp()
 	RUNTIME_TRACE_EVENT(Destroy, UServerApp, ~UServerApp, _RuntimeTraceID.Get());
 }
 
-bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout)
+bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout, const FDbConfig& dbConfig)
 {
 	RUNTIME_TRACE_SCOPE(UServerApp, Start, _RuntimeTraceID.Get());
 	RETURN_INVALID_COND(_bRunning.load(), false);
@@ -117,6 +118,7 @@ bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout)
 		_NetworkFailed.store(false, std::memory_order_relaxed);
 		_InputFailed.store(false);
 		_LoggerFailed.store(false);
+		_RemainingNetworkWorkers.store(0);
 		_RemainingLogProducers.store(0);
 		_StopState.store(EStopState::NotRequested, std::memory_order_relaxed);
 
@@ -143,6 +145,17 @@ bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout)
 			return false;
 		}
 		_NicknameRegistry = MakeShared<UNicknameRegistry>();
+		_DatabaseManager = MakeShared<UDatabaseManager>(_CoreInstance, dbConfig);
+		if (dbConfig.Enabled) {
+			Core::FString dbError;
+			if (!_DatabaseManager->Initialize(dbError)) {
+				std::cerr << "MySQL database initialization failed (" << dbConfig.Host.View() << ":" << dbConfig.Port
+					<< "/" << dbConfig.Database.View() << "): " << dbError.View() << '\n';
+				ClearObject();
+				return false;
+			}
+		}
+
 		for (const FFixedRoomSpec& spec : FIXED_GAME_ROOMS) {
 			const auto room = MakeShared<UGameRoom>(
 				_CoreInstance,
@@ -160,7 +173,8 @@ bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout)
 		// 리스너는 네트워크 워커를 등록하기 전에 시작해야 한다. 지금은 이 PC(127.0.0.1)의 접속만 받는다.
 		BOOST_ERROR_CODE error;
 		const bool started = networkManager->StartListener(
-			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext(), _NicknameRegistry, sessionIdleTimeout),
+			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext(), _NicknameRegistry,
+				sessionIdleTimeout, _DatabaseManager),
 			TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
 			[this](const BOOST_ERROR_CODE& acceptError) {
 				// 리스너는 accept 오류 뒤 새 접속을 받지 않으므로 서버를 끝낸다. 흔한 접속 중단은 Boost가 다시 받는다.
@@ -205,13 +219,22 @@ bool UServerApp::RegisterWorkers(uint32 networkWorkerCount)
 		return false;
 
 	// 일부 등록 후 실패해도 종료 대기가 끝나기 전까지 객체를 유지한다.
+	const uint32 dbWorkerCount = (_DatabaseManager && _DatabaseManager->IsEnabled())
+		? _DatabaseManager->GetConfig().WorkerCount : 0u;
 	_WorkersRegistered = true;
-	_RemainingLogProducers.store(static_cast<uint64>(networkWorkerCount) + 1, std::memory_order_release);
+	_RemainingNetworkWorkers.store(static_cast<uint64>(networkWorkerCount), std::memory_order_release);
+	_RemainingLogProducers.store(static_cast<uint64>(networkWorkerCount) + static_cast<uint64>(dbWorkerCount) + 1ull,
+		std::memory_order_release);
 	try {
 		if (!_CoreInstance->RegisterWorkerThread(networkWorkerCount, 
 			[this](EXPECTION_PTR failure) noexcept { ReportFailure(_NetworkFailed, _NetworkFailure, failure); },
-			[this]() noexcept { LogProducerFinished(); }))
+			[this]() noexcept { NetworkWorkerFinished(); }))
 			return false;
+
+		if (dbWorkerCount > 0) {
+			if (!_DatabaseManager->RegisterWorkers(threadManager, [this]() noexcept { LogProducerFinished(); }))
+				return false;
+		}
 
 		if (!threadManager->RegisterFunc(RunInputWorker, this))
 			return false;
@@ -236,7 +259,9 @@ bool UServerApp::RegisterWorkers(uint32 networkWorkerCount)
 
 		{
 			FString readyMessage{ "Server ready on 127.0.0.1:" };
-			readyMessage << std::to_string(_ListenPort) << " (workers=" << std::to_string(networkWorkerCount) << ")";
+			readyMessage << std::to_string(_ListenPort) << " (workers=" << std::to_string(networkWorkerCount)
+				<< ", db=" << (dbWorkerCount > 0 ? "mysql" : "off")
+				<< ", dbWorkers=" << std::to_string(dbWorkerCount) << ")";
 			logger->TryLog(ELogLevel::Info, readyMessage.View());
 		}
 
@@ -373,6 +398,17 @@ void UServerApp::ReportFailure(ATOMIC<bool>& failed, EXPECTION_PTR& storedFailur
 	RequestStop();
 }
 
+// 모든 네트워크 워커가 종료되면 DB 전용 스레드에 잔여 작업 배수(Drain) 종료 신호를 보낸다.
+void UServerApp::NetworkWorkerFinished() noexcept
+{
+	RUNTIME_TRACE_SCOPE(UServerApp, NetworkWorkerFinished, _RuntimeTraceID.Get());
+	if (_RemainingNetworkWorkers.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+		if (_DatabaseManager && _DatabaseManager->IsEnabled())
+			_DatabaseManager->RequestStop();
+	}
+	LogProducerFinished();
+}
+
 void UServerApp::LogProducerFinished() noexcept
 {
 	RUNTIME_TRACE_SCOPE(UServerApp, LogProducerFinished, _RuntimeTraceID.Get());
@@ -387,6 +423,7 @@ void UServerApp::ClearObject()
 {
 	RUNTIME_TRACE_SCOPE(UServerApp, ClearObject, _RuntimeTraceID.Get());
 	_ServerInput.reset();
+	_DatabaseManager.reset();
 	_NicknameRegistry.reset();
 	_CoreInstance.reset();
 }

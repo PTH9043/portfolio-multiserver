@@ -73,31 +73,78 @@ int main(int argc, char* argv[])
 	Core::uint32 port = 0;
 	Core::ERuntimeTraceMode traceMode = Core::ERuntimeTraceMode::AsyncStream;
 	Core::MILLISECONDS idleTimeout = Core::SESSION_DEFAULT_IDLE_TIMEOUT;
-	if (argc < 3 || argc > 5
+	Server::FDbConfig dbConfig{};
+	const char* usageMsg =
+		"Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] "
+		"[--idle-timeout-ms=<ms>] [--db=mysql|off] [--db-host=<host>] [--db-port=<port>] "
+		"[--db-user=<user>] [--db-pass=<pass>] [--db-name=<name>] [--db-workers=<1..16>] [--pbkdf2-iters=<1000..300000>]\n";
+	if (argc < 3
 		|| !ParsePositiveNumber(argv[1], static_cast<Core::uint32>(-1), workerCount)
 		|| !ParsePositiveNumber(argv[2], 65535, port)) {
-		fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
+		fprintf(stderr, "%s", usageMsg);
 		return 1;
 	}
-	constexpr const char* IDLE_TIMEOUT_PREFIX = "--idle-timeout-ms=";
-	const Core::uint64 idlePrefixLen = static_cast<Core::uint64>(strlen(IDLE_TIMEOUT_PREFIX));
+	auto matchPrefix = [](const char* arg, const char* prefix, const char*& outValue) noexcept -> bool {
+		const Core::uint64 len = static_cast<Core::uint64>(strlen(prefix));
+		if (strncmp(arg, prefix, len) != 0)
+			return false;
+		outValue = arg + len;
+		return true;
+	};
 	for (int i = 3; i < argc; ++i) {
+		const char* val = nullptr;
 		if (strcmp(argv[i], "--trace=stream") == 0)
 			traceMode = Core::ERuntimeTraceMode::AsyncStream;
 		else if (strcmp(argv[i], "--trace=flight") == 0)
 			traceMode = Core::ERuntimeTraceMode::FlightRecorder;
 		else if (strcmp(argv[i], "--trace=off") == 0)
 			traceMode = Core::ERuntimeTraceMode::Off;
-		else if (strncmp(argv[i], IDLE_TIMEOUT_PREFIX, idlePrefixLen) == 0) {
+		else if (strcmp(argv[i], "--db=mysql") == 0)
+			dbConfig.Enabled = true;
+		else if (strcmp(argv[i], "--db=off") == 0)
+			dbConfig.Enabled = false;
+		else if (matchPrefix(argv[i], "--idle-timeout-ms=", val)) {
 			Core::uint32 idleMs = 0;
-			if (!ParseNonNegativeNumber(argv[i] + idlePrefixLen, 3600000, idleMs)) {
-				fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
+			if (!ParseNonNegativeNumber(val, 3600000, idleMs)) {
+				fprintf(stderr, "%s", usageMsg);
 				return 1;
 			}
 			idleTimeout = Core::MILLISECONDS{ idleMs };
 		}
+		else if (matchPrefix(argv[i], "--db-host=", val))
+			dbConfig.Host = Core::FString{ val };
+		else if (matchPrefix(argv[i], "--db-port=", val)) {
+			Core::uint32 dbPort = 0;
+			if (!ParsePositiveNumber(val, 65535, dbPort)) {
+				fprintf(stderr, "%s", usageMsg);
+				return 1;
+			}
+			dbConfig.Port = static_cast<Core::uint16>(dbPort);
+		}
+		else if (matchPrefix(argv[i], "--db-user=", val))
+			dbConfig.User = Core::FString{ val };
+		else if (matchPrefix(argv[i], "--db-pass=", val))
+			dbConfig.Password = Core::FString{ val };
+		else if (matchPrefix(argv[i], "--db-name=", val))
+			dbConfig.Database = Core::FString{ val };
+		else if (matchPrefix(argv[i], "--db-workers=", val)) {
+			Core::uint32 dbWorkers = 0;
+			if (!ParsePositiveNumber(val, 16, dbWorkers)) {
+				fprintf(stderr, "%s", usageMsg);
+				return 1;
+			}
+			dbConfig.WorkerCount = dbWorkers;
+		}
+		else if (matchPrefix(argv[i], "--pbkdf2-iters=", val)) {
+			Core::uint32 iters = 0;
+			if (!ParsePositiveNumber(val, 300000, iters) || iters < 1000) {
+				fprintf(stderr, "%s", usageMsg);
+				return 1;
+			}
+			dbConfig.Pbkdf2Iterations = iters;
+		}
 		else {
-			fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
+			fprintf(stderr, "%s", usageMsg);
 			return 1;
 		}
 	}
@@ -108,7 +155,7 @@ int main(int argc, char* argv[])
 	bool success = false;
 	{
 		Server::UServerApp serverApp;
-		if (serverApp.Start(static_cast<Core::uint16>(port), idleTimeout)) {
+		if (serverApp.Start(static_cast<Core::uint16>(port), idleTimeout, dbConfig)) {
 			if (serverApp.RegisterWorkers(workerCount)) {
 				printf("Press Enter to stop the server.\n");
 				success = serverApp.JoinWorkers();

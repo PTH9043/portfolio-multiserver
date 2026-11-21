@@ -1,6 +1,6 @@
 # MultiServer — C++20 Boost.Asio 멀티플레이어 채팅 서버 & 런타임 관측 아키텍처
 
-> **기준일**: 2026-11-22 · **언어/스택**: C++20/Latest (MSVC v145, x64) · Boost.Asio 1.92.0 · Protocol Buffers v33.6 · Custom Memory Pool · Async `ULogger` · `CVTRACE1` + `.cvlog` 이중 관측 파이프라인
+> **기준일**: 2026-11-22 · **언어/스택**: C++20/Latest (MSVC v145, x64) · Boost.Asio 1.92.0 · Protocol Buffers v33.6 · MariaDB Connector/C 3.4.11 (MySQL 8.4 C API) · Win32 CNG PBKDF2-HMAC-SHA256 · Custom Memory Pool · Async `ULogger` · `CVTRACE1` + `.cvlog` 이중 관측 파이프라인
 >
 > 본 프로젝트는 **Core(DLL) – Server(EXE) – Protocol(Protobuf) – 별도 C# WinForms Client([../Client](../Client))** 4계층으로 분리된 고동시성 다중 방 채팅 서버와, AI 협업 개발의 변경·프로토콜·런타임 호출을 직접 검증하기 위한 관측 도구(**ChangeViewer**) 연동 구조를 함께 구현·실측한 프로젝트입니다.
 
@@ -16,11 +16,13 @@
                                     │ TCP (127.0.0.1:<port>)
 ┌───────────────────────────────────▼────────────────────────────────────────┐
 │  Server (ServerApp.exe)                                                    │
-│  UServerApp ─ UServerListener ─ UServerSession (로그인 전 핸드셰이크 전용) │
+│  UServerApp ─ UServerListener ─ UServerSession (회원가입/로그인 핸드셰이크)│
+│  UDatabaseManager (DB 전용 워커 4스레드 · 스레드당 전용 MYSQL* · 3단 배수) │
+│  FMySqlConnection (RAII + Prepared Statement) · PasswordHasher (CNG PBKDF2)│
 │  UPlayer (UPawn 컴포넌트 소유, 도메인 패킷·방 이동·전역 닉네임 RAII 관리)  │
 │  UGameRoom × 4 (로비/자유/전략/거래, 독립 Strand · 내부 mutex 0 · 25ms 병합)│
 ├────────────────────────────────────────────────────────────────────────────┤
-│  Core (Core.dll — Protobuf 비의존 · dynamic_cast 0건)                      │
+│  Core (Core.dll — Protobuf · DB 비의존 · dynamic_cast 0건)                 │
 │  UCoreInstance ─ UThreadManager / UNetworkManager / ULogger / URoomManager │
 │  UComponent · UPawn(CONUNORMAP) · USession(Shared Frame·1MiB Cap·유휴타이머)│
 │  FPacketView(NO_COPY) + FPacketPayload(Detach 불변) · CustomMemory TLS 풀  │
@@ -72,7 +74,15 @@
 - **다중 부하 + 중도 이탈 (489쪽)**: 120명 동시 접속(정상 100 · 중복 거절 10 · 규칙 위반 거절 10) + 40명 동시 이탈 + 잔류 60명 대상 채팅 200건 브로드캐스트 무손실 수신(`850.3 ms`).
 - **경고 정책 및 1 MiB 백프레셔 차단 (489쪽)**: 빈 채팅/201한글자/220영문자 경고 후 연결 유지, 깨진 Protobuf·미정의 999·헤더 1,021 B 초과 경고 후 즉시 차단, 비수신 `SlowReader` 1 MiB 송신 큐 초과 강제 차단(`.cvlog` 실측).
 - **C++ 서버 ↔ C# WinForms 클라이언트 E2E (482·490·491쪽)**: 한글 닉네임·중복/규칙 거절·3바이트 분할/2패킷 병합 프레이밍·25명 20명 단위 페이징·양방향 채팅·`CVTRACE1`/`.cvlog` 실행 추적 모두 PASS.
-- **빌드 & Core 계약 시험 (488~491쪽)**: `Debug|x64` · `Release|x64` 모두 **오류 0 / 경고 0**, `ListenerContracts`(7/7) · `LoggerContracts`(3/3) · `MemoryContracts`(7/7) 전항목 PASS.
+- **빌드 & Core 계약 시험 (488~499쪽)**: `Debug|x64` · `Release|x64` 및 C# `ChatClient` 모두 **오류 0 / 경고 0**, `ListenerContracts` · `LoggerContracts` · `MemoryContracts` · `SessionContracts` 4종 전항목 PASS.
+
+### ③ Phase 2 Docker MySQL 8.4 실DB 영속 · PBKDF2 인증 · DB 전용 4스레드 실측 (499쪽)
+| 측정 항목 (`tools/run_mysql_e2e.py`) | `--db=off` (인메모리 기준선) | `--db=mysql` (`1,000회` 순수 DB I/O) | `--db=mysql` (`60,000회` 운영 보안) | 비고 |
+|---|---:|---:|---:|---|
+| 100계정 동시 회원가입 (`CS_REGISTER`) | 해당 없음 | `374.51 ms` | `2,874.14 ms` | 16B 솔트 + 32B PBKDF2-HMAC-SHA256 |
+| 100명 동시 로그인 (`CS_LOGIN`) | `57.67 ms` | `905.03 ms` | `3,214.11 ms` | `accounts` 조회 + 검증 + `connection_logs` 생성 |
+| 잔류 70명 × 100건 채팅 (7,000건) | `108.26 ms` (`64.66 Kmsg/s`, stream) | **`47.26 ms` (`148.12 Kmsg/s`, off)** | **`40.62 ms` (`172.33 Kmsg/s`, off)** | DB 스레드 격리로 실시간 채팅 무손실 |
+| 100명 퇴장 후 3단 배수 종료 | `rc=0, stderr=0B` | `90.23 ms` (미종료 `0/102`) | `95.44 ms` (미종료 `0/102`) | `last_room_id=3`, `disconnect_reason='NORMAL'` 검증 |
 
 ---
 
@@ -82,19 +92,21 @@ TCP 프레임 형식: `[uint16 type (LE)] [uint16 size (LE)] [Protobuf Body (0..
 
 | 방향 | 패킷 Enum | 번호 | 메시지 | 설명 / 한도 |
 |---|---|---:|---|---|
-| C → S | `CS_LOGIN` | 1 | `CSLogin` | 닉네임 2~12자(완성형 한글·영문·숫자), 서버 전역 중복 시 거절 |
+| C → S | `CS_LOGIN` | 1 | `CSLogin` | `--db=mysql`: `username`+`password`(PBKDF2 검증) / `--db=off`: `nickname`(2~12자 한글·영문·숫자) |
 | C → S | `CS_CHAT` | 2 | `CSChat` | 채팅 본문 1~200자 UTF-8 (초과 시 Warning, 연결 유지) |
 | C → S | `CS_ROOM_USERS` | 3 | `CSRoomUsers` | `offset` 기준 현재 방 참가자 목록 요청 |
 | C → S | `CS_ROOM_LIST` | 4 | `CSRoomList` | 고정 4채널 목록·인원 수 조회 |
 | C → S | `CS_JOIN_ROOM` | 5 | `CSJoinRoom` | 지정 방으로 크로스-스트랜드 이동 요청 |
 | C → S | `CS_PING` | 6 | `CSPing` | 유휴 연결 유지 및 RTT 측정 하트비트 |
-| S → C | `SC_LOGIN_RESULT` | 1 | `SCLoginResult` | `ELoginResult` + 입장 방 ID + 현재 인원 수 |
+| C → S | `CS_REGISTER` | 7 | `CSRegister` | 회원가입(`username` 4~20자, `password` 6~64자, `nickname` 2~12자) |
+| S → C | `SC_LOGIN_RESULT` | 1 | `SCLoginResult` | `ELoginResult` + 입장 방 ID + 현재 인원 수 + 확정 DB `nickname` |
 | S → C | `SC_CHAT` | 2 | `SCChat` | 발신자 닉네임 + 채팅 본문 (현재 방 전체 브로드캐스트) |
 | S → C | `SC_ROOM_USER_COUNT` | 3 | `SCRoomUserCount` | 25 ms 병합 인원 수 알림 (방당 최대 1,000명) |
 | S → C | `SC_ROOM_USERS` | 4 | `SCRoomUsers` | 최대 20명 닉네임 목록 + `total` |
 | S → C | `SC_ROOM_LIST` | 5 | `SCRoomList` | 고정 4채널(`로비`/`자유`/`전략`/`거래`) 요약 목록 |
 | S → C | `SC_JOIN_ROOM_RESULT` | 6 | `SCJoinRoomResult` | `EJoinRoomResult` + 최종 소속 방 ID + 인원 수 |
 | S → C | `SC_PONG` | 7 | `SCPong` | `CS_PING` 타임스탬프 즉시 에코 |
+| S → C | `SC_REGISTER_RESULT` | 8 | `SCRegisterResult` | `ERegisterResult` (성공 / 규칙 위반 / 아이디·닉네임 중복 / DB 오류) |
 
 ---
 
@@ -109,18 +121,21 @@ Build_Protocol.bat Release
 Update_Core_Server.bat Release
 ```
 
-### 2) 서버 실행
+### 2) Docker MySQL 8.4 기동 및 서버 실행
 ```bat
+docker compose -f db\docker-compose.yml up -d
 Server\Bin\Release\ServerApp.exe 4 7777 --trace=stream
 ```
-- 인자: `ServerApp.exe <네트워크 워커 수> <포트> [--trace=stream|flight|off]` (`127.0.0.1:<포트>` 바인딩, `Enter` 키로 정상 종료)
-- 트레이스 모드 생략 시 기본값은 `--trace=stream`이며, 성능 측정 전용 실행 시 `--trace=off`를 지정합니다.
+- 인자: `ServerApp.exe <네트워크 워커 수> <포트> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>] [--db=mysql|off] [--db-host=127.0.0.1] [--db-port=3306] [--db-user=multiserver] [--db-pass=multiserver_dev_pw] [--db-name=multiserver] [--db-workers=4] [--pbkdf2-iters=60000]` (`127.0.0.1:<포트>` 바인딩, `Enter` 키로 3단 배수 정상 종료)
+- 기본값은 `--trace=stream` · `--db=mysql`이며, MySQL 없이 순수 인메모리 기준선을 실행하려면 `--db=off`를 지정합니다.
 
-### 3) 원클릭 E2E · 부하 · 백프레셔 재현 검증
+### 3) 원클릭 E2E · 부하 · 백프레셔 · 실DB 재현 검증
 ```bat
 python tools\run_e2e_verify.py
+python tools\run_mysql_e2e.py --exe Server\Bin\Release\ServerApp.exe
 ```
-- 외부 Python 패키지 없이 표준 라이브러리만으로 `ServerApp.exe`를 임시 포트에 띄워 **로그인/중복/규칙 거절 · TCP 1B 분할/2패킷 병합 · 25명 페이징 · 경고/차단 5종 · 100명 동시 부하/이탈 · 1 MiB SlowReader 백프레셔 · 정상 종료 및 `.cvtrace`/`.cvlog` 검증**을 한 번에 재현합니다.
+- `run_e2e_verify.py`는 `--db=off`로 로그인/중복/규칙 거절 · TCP 1B 분할/2패킷 병합 · 25명 페이징 · 경고/차단 5종 · 100명 동시 부하/이탈 · 1 MiB SlowReader 백프레셔 · 4채널 다중 방 · 유휴 타임아웃 · 정상 종료 및 `.cvtrace`/`.cvlog` 검증(10/10)을 재현합니다.
+- `run_mysql_e2e.py`는 Docker `multiserver-mysql`과 실제로 연결해 회원가입·PBKDF2 인증·중복 접속 차단·SQL 테이블 정합성·3단 배수 종료·100계정 동시 가입/로그인 및 7,000건 채팅 격리 부하를 검증합니다.
 
 ### 4) Core 계약 단위 시험
 ```bat
@@ -131,15 +146,17 @@ Tests\.build\LoggerContracts\Debug\bin\LoggerContracts.exe
 msbuild Tests\ListenerContracts.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64
 Tests\.build\ListenerContracts\Debug\bin\ListenerContracts.exe
 ```
-> **참고 (보존/예약 항목)**: `Tests/` 내 `MemoryWalkthrough`, `ThreadSchedulerTests`, `SessionContracts`는 초기 구버전 API를 참조하는 아카이브 프로젝트로 현재 회귀 시험 대상이 아닙니다. `Core/Public/UJobQueue.h`는 추후 게임 루프 확장용으로 보존된 예약 클래스입니다.
+> **참고 (보존/예약 항목)**: `Tests/` 내 `MemoryContracts` · `LoggerContracts` · `ListenerContracts` · `SessionContracts` 4종이 현재 Core 회귀 시험 대상입니다. `MemoryWalkthrough` · `ThreadSchedulerTests`는 초기 구버전 API를 참조하는 아카이브 프로젝트입니다. `Core/Public/UJobQueue.h`는 추후 게임 루프 확장용으로 보존된 예약 클래스입니다.
 
 ---
 
 ## 6. 프로젝트 폴더 구조
 
-- `Core/` — 공통 네트워크·메모리 풀·비동기 로거·액터/방 기반·런타임 트레이스 DLL
-- `Server/` — 채팅 서버 애플리케이션(`ServerApp`, `UServerListener`, `UServerSession`, `UGameRoom`, `UPlayer`)
+- `Core/` — 공통 네트워크·메모리 풀·비동기 로거·액터/방 기반·런타임 트레이스 DLL (Protobuf · DB 비의존)
+- `Server/` — 채팅 서버 애플리케이션(`ServerApp`, `UServerListener`, `UServerSession`, `UDatabaseManager`, `FMySqlConnection`, `PasswordHasher`, `UGameRoom`, `UPlayer`)
+- `db/` — Docker MySQL 8.4 구성(`docker-compose.yml`) 및 스키마(`schema.sql`: `accounts`, `connection_logs`)
 - `Protocol/` — `.proto` 스키마, `Build_Protocol.bat` 생성 파이프라인, `ServerProtocol.props`(`/external:W0`)
-- `Tests/` — Core 계약 회귀 시험(`MemoryContracts`, `LoggerContracts`, `ListenerContracts`)
-- `tools/` — 프로토콜 빌드/검증 스크립트 및 원클릭 E2E 재현기(`run_e2e_verify.py`)
-- `로그_설계_자료/` — 설계·의사결정·실측 기록(`로그_설계_기록.pdf`, 491쪽, 대용량으로 Git 제외)
+- `Tests/` — Core 계약 회귀 시험 4종(`MemoryContracts`, `LoggerContracts`, `ListenerContracts`, `SessionContracts`)
+- `tools/` — 프로토콜 빌드/검증 스크립트, 인메모리 E2E(`run_e2e_verify.py`), 실DB MySQL E2E(`run_mysql_e2e.py`)
+- `docs/` — 비개발자용 쉬운 한국어 성능·안전성 실험 보고서(`MultiServer_StressTest_Report_20261122.html` / `.pdf`)
+- `로그_설계_자료/` — 설계·의사결정·실측 기록(`로그_설계_기록.pdf`, 대용량으로 Git 제외)

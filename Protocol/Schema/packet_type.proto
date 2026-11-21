@@ -14,6 +14,7 @@ enum ECSPacket {
   CS_ROOM_LIST = 4;   // CSRoomList
   CS_JOIN_ROOM = 5;   // CSJoinRoom
   CS_PING = 6;        // CSPing
+  CS_REGISTER = 7;    // CSRegister
 }
 
 // 서버 → 클라이언트
@@ -26,4 +27,5 @@ enum ESCPacket {
   SC_ROOM_LIST = 5;        // SCRoomList
   SC_JOIN_ROOM_RESULT = 6; // SCJoinRoomResult
   SC_PONG = 7;             // SCPong
+  SC_REGISTER_RESULT = 8;  // SCRegisterResult
 }
