@@ -101,11 +101,15 @@ void USession::SendShared(const SHPTR<const BUFFER>& framedBuffer)
             return;
 
         const uint64 frameBytes{ static_cast<uint64>(framedBuffer->size()) };
-        if (session->_QueuedSendBytes + frameBytes > SESSION_MAX_SEND_QUEUE_BYTES) {
+        if (frameBytes > SESSION_MAX_SEND_QUEUE_BYTES - session->_QueuedSendBytes) {
             const auto coreInstance = session->GetCoreInstance();
             const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
-            if (logger)
-                logger->TryLog(ELogLevel::Warning, "USession send queue exceeded limit; closing slow connection");
+            if (logger) {
+                FString message{ "USession send queue exceeded limit (" };
+                message << std::to_string(session->_QueuedSendBytes + frameBytes) << '/'
+                        << std::to_string(SESSION_MAX_SEND_QUEUE_BYTES) << " bytes); closing slow connection";
+                logger->TryLog(ELogLevel::Warning, message.View());
+            }
             session->CloseConnection();
             return;
         }
@@ -257,6 +261,14 @@ void USession::CombinePacket(const BOOST_ERROR_CODE& error, uint64 receivedBytes
         std::memcpy(&header, _ReceiveBuffer.data() + processedBytes, PACKET_HEADER_SIZE);
 
         if (header.size > PACKET_MAX_BODY_SIZE) {
+            const auto coreInstance = GetCoreInstance();
+            const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+            if (logger) {
+                FString message{ "USession rejected oversized packet header (type=" };
+                message << std::to_string(header.type) << ", size=" << std::to_string(header.size)
+                        << ", max=" << std::to_string(PACKET_MAX_BODY_SIZE) << "); closing connection";
+                logger->TryLog(ELogLevel::Warning, message.View());
+            }
             validPacketSize = false;
             break;
         }

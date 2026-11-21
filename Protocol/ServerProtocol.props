@@ -8,9 +8,13 @@
     <ProtocolLibrary Include="$(ProtocolRoot)build\vendor\protobuf\third_party\utf8_range\$(Configuration)\*.lib" />
     <ProtocolLibrary Include="$(ProtocolRoot)build\_deps\absl-build\absl\**\$(Configuration)\*.lib" />
   </ItemGroup>
+  <PropertyGroup Condition="'$(Platform)'=='x64' And Exists('$(ProtocolRoot)build\$(Configuration)\GameProtocol.lib')">
+    <ExternalIncludePath>$(ProtocolRoot)vendor\protobuf\src;$(ProtocolRoot)build\_deps\absl-src;$(ProtocolRoot)vendor\protobuf\third_party\utf8_range;$(ExternalIncludePath)</ExternalIncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64' And Exists('$(ProtocolRoot)build\$(Configuration)\GameProtocol.lib')">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProtocolRoot)Generated\Cpp;$(ProtocolRoot)vendor\protobuf\src;$(ProtocolRoot)build\_deps\absl-src;$(ProtocolRoot)vendor\protobuf\third_party\utf8_range;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProtocolRoot)Generated\Cpp;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ExternalWarningLevel>TurnOffAllWarnings</ExternalWarningLevel>
     </ClCompile>
   </ItemDefinitionGroup>
   <Target Name="LinkGeneratedProtocol" BeforeTargets="Link" Condition="'$(Platform)'=='x64' And Exists('$(ProtocolRoot)build\$(Configuration)\GameProtocol.lib')">

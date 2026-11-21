@@ -158,24 +158,47 @@ inline bool IsValidNickname(Core::STRINGVIEW nickname) noexcept
 	return charCount >= NICKNAME_MIN_CHARS && charCount <= NICKNAME_MAX_CHARS;
 }
 
-// 채팅 본문 규칙: 유효한 UTF-8 1~200자.
-inline bool IsValidChatText(Core::STRINGVIEW text) noexcept
+enum class EChatTextError : Core::uint8 {
+	None = 0,
+	Empty,
+	TooLong,
+	InvalidUtf8,
+};
+
+constexpr Core::STRINGVIEW GetChatTextErrorReason(EChatTextError error) noexcept
 {
-	if (text.empty() || text.size() > CHAT_MAX_UTF8_BYTES)
-		return false;
+	switch (error) {
+	case EChatTextError::Empty: return "empty";
+	case EChatTextError::TooLong: return "exceeded 200 chars";
+	case EChatTextError::InvalidUtf8: return "invalid utf-8";
+	default: return "none";
+	}
+}
+
+// 채팅 본문 규칙: 유효한 UTF-8 1~200자. 실패 이유를 구분해 반환한다.
+inline EChatTextError ValidateChatText(Core::STRINGVIEW text) noexcept
+{
+	if (text.empty())
+		return EChatTextError::Empty;
 
 	Core::uint64 index{ 0 };
 	Core::uint64 charCount{ 0 };
 	while (index < text.size()) {
 		Core::uint32 codePoint{ 0 };
 		if (!DecodeUtf8CodePoint(text, index, codePoint))
-			return false;
+			return EChatTextError::InvalidUtf8;
 		++charCount;
 		if (charCount > CHAT_MAX_CHARS)
-			return false;
+			return EChatTextError::TooLong;
 	}
 
-	return charCount >= CHAT_MIN_CHARS && charCount <= CHAT_MAX_CHARS;
+	return charCount >= CHAT_MIN_CHARS ? EChatTextError::None : EChatTextError::Empty;
+}
+
+// 채팅 본문 규칙: 유효한 UTF-8 1~200자.
+inline bool IsValidChatText(Core::STRINGVIEW text) noexcept
+{
+	return ValidateChatText(text) == EChatTextError::None;
 }
 
 SPACE_T

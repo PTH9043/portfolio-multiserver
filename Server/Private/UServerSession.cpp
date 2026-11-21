@@ -169,12 +169,13 @@ void UServerSession::OnPacket(const Protocol::CSChat& packet)
 	}
 
 	const Core::STRINGVIEW text{ packet.text() };
-	if (!IsValidChatText(text)) {
+	const EChatTextError textError = ValidateChatText(text);
+	if (textError != EChatTextError::None) {
 		const auto coreInstance = GetCoreInstance();
 		const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
 		if (logger) {
 			Core::FString message{ "UServerSession ignored invalid chat text (" };
-			message << std::to_string(text.size()) << " bytes)";
+			message << GetChatTextErrorReason(textError) << ", " << std::to_string(text.size()) << " bytes)";
 			logger->TryLog(Core::ELogLevel::Warning, message.View());
 		}
 		return;
