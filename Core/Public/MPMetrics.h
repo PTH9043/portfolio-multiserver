@@ -18,7 +18,13 @@ public:
 	void RecordMPMetrics(EMemoryPoolMetricIndex eMemoryPoolMetricIndex);
 	FMPRuntimeMetricsSnapshot ReadSnapshot() const;
 private:
-	std::array<ATOMIC_UINT64, EMemoryPoolMetricIndex::MaxIndex> _MpMetricsIndexArray;
+	// 항목별 원자 카운터를 64바이트 캐시라인으로 분리해 워커 간 거짓 공유(False Sharing)를 방지한다.
+	struct ALIGNAS(64) FAlignedMetricCounter final
+	{
+		ATOMIC_UINT64 Value{ 0 };
+		uint8 Padding[64 - sizeof(ATOMIC_UINT64)]{};
+	};
+	std::array<FAlignedMetricCounter, EMemoryPoolMetricIndex::MaxIndex> _MpMetricsIndexArray{};
 };
 SPACE_T
 

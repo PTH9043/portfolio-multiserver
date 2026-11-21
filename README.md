@@ -1,111 +1,139 @@
-# 다중 접속 2D → 3D 게임
+# MultiServer — C++20 Boost.Asio 멀티플레이어 채팅 서버 & 런타임 관측 아키텍처
 
-> **2026-11-08 현재 구조 안내:** 현재 솔루션에는 Core와 Server만 있으며 예전 GameClient2D 경로는 없습니다. 별도 클라이언트는 `../Client/ChatClient.csproj`의 빈 Windows Forms 프로젝트입니다. 아래의 과거 일정과 준비 보고는 당시 기록으로 보존하며, 현재 채팅 서버 우선순위와 AI 협업 계획은 [상위 작업 순서](../README.md)를 따릅니다.
+> **기준일**: 2026-11-21 · **언어/스택**: C++20/Latest (MSVC v145, x64) · Boost.Asio 1.92.0 · Protocol Buffers v33.6 · Custom Memory Pool · Async `ULogger` · `CVTRACE1` + `.cvlog` 이중 관측 파이프라인
+>
+> 본 프로젝트는 **Core(DLL) – Server(EXE) – Protocol(Protobuf) – 별도 C# WinForms Client([../Client](../Client))** 4계층으로 분리된 고동시성 채팅 서버와, AI 협업 개발의 변경·프로토콜·런타임 호출을 직접 검증하기 위한 관측 도구(**ChangeViewer**) 연동 구조를 함께 구현·실측한 프로젝트입니다.
 
+---
 
-## Core 갱신과 Protocol Buffers
+## 1. 아키텍처 개요
 
-- Core의 Boost 헤더는 `ThirdParty/boost_1_92_0`에 보관한 Boost 1.92.0을 사용합니다. Core와 Server의 `BoostIncludeDir` 빌드 속성으로 다른 Boost 헤더 경로를 지정할 수 있습니다. 이 폴더에는 공식 배포본의 헤더와 라이선스가 있으며 빌드된 Boost 라이브러리는 포함하지 않습니다.
-- `Update_Core_Server.bat`을 실행하면 Core와 Server를 Debug x64로 빌드하고, Server 실행 폴더의 Core DLL이 빌드된 DLL과 같은지 검사합니다. 기존 Visual Studio 솔루션 빌드도 Core 프로젝트 참조와 DLL 복사를 수행합니다. Release는 명령 프롬프트에서 `.\Update_Core_Server.bat Release`로 실행합니다.
-- 패킷 번호는 `Protocol/Schema/packet_type.proto`의 `ECSPacket`(클라→서버)·`ESCPacket`(서버→클라)에, 메시지는 영역별 파일(`login.proto`·`chat.proto`·`room.proto`)에 둡니다. 번호 0은 비워 두고, 사용했던 패킷 번호와 필드 번호는 다시 쓰지 마세요.
-- `Build_Protocol.bat`을 실행하면 `.proto` 전체에서 C++(`Protocol/Generated/Cpp`)과 C#(`Protocol/Generated/CSharp`) 코드를 만들고 C++ `GameProtocol.lib`를 Debug x64로 빌드합니다. Release는 명령 프롬프트에서 `.\Build_Protocol.bat Release`입니다. 생성 폴더는 자동 생성 전용이므로 직접 수정하지 말고 `.proto`를 수정한 뒤 다시 실행하세요. Windows용 `protoc`의 경로 처리 때문에 `.proto` 파일과 하위 폴더 이름은 영문·숫자·밑줄을 사용하세요.
-- C++ 서버는 `#include "login.pb.h"`처럼 영역별 생성 헤더로 메시지에 접근하며, 프로토콜 빌드가 완료된 같은 구성의 라이브러리를 사용합니다. C# 클라이언트는 `Google.Protobuf` 패키지와 생성된 C# 코드를 참조합니다. 생성 코드를 바꾼 뒤 각 프로젝트를 다시 빌드하세요.
-- `.proto`를 수정한 뒤에는 사용하려는 구성(Debug 또는 Release)으로 `Build_Protocol.bat`을 다시 실행하세요. 새 정의에 비해 프로토콜 빌드가 오래된 경우 Server와 GameClient2D 빌드는 재생성을 안내하고 멈춥니다. 구성별로 각각 다시 빌드해야 합니다.
-- 첫 실행에는 Git, Visual Studio의 C++ 도구와 CMake, Python, 인터넷이 필요합니다. `Protocol/vendor`와 `Protocol/build`는 소스 의존성과 빌드 결과를 보관합니다. 생성기는 공식 Google.Protobuf.Tools 3.33.6, C++ 런타임은 protobuf v33.6 소스를 사용합니다. 다른 버전으로 따로 교체하지 마세요.
-- protobuf는 본문의 직렬화 형식입니다. TCP 메시지 경계는 기존 4바이트 머리말(`type`=패킷 번호, `size`=본문 크기)로 나눕니다. 서버의 패킷 해석·송신 처리는 아직 구현하지 않았습니다(결정 사항은 `AGENTS.md` 1-1절).
+```text
+┌────────────────────────────────────────────────────────────────────────────┐
+│  ChatClient (.NET 10 WinForms, ../Client)  /  Python E2E Verifier (tools)  │
+│  [4B LE Header: uint16 type | uint16 size] + [Protobuf Body <= 1,020 B]    │
+└───────────────────────────────────┬────────────────────────────────────────┘
+                                    │ TCP (127.0.0.1:<port>)
+┌───────────────────────────────────▼────────────────────────────────────────┐
+│  Server (ServerApp.exe)                                                    │
+│  UServerApp ─ UServerListener ─ UServerSession (공용 HandlePacket<T>)      │
+│  UPlayer (불변 FPlayerInfo + WKPTR<USession>)                              │
+│  UGameRoom : Core::URoom (Strand 직렬화, 내부 mutex 0개, 25ms Coalescing)  │
+├────────────────────────────────────────────────────────────────────────────┤
+│  Core (Core.dll — Protobuf 비의존)                                         │
+│  UCoreInstance ─ UThreadManager / UNetworkManager / ULogger / URoomManager │
+│  UListener · USession (Shared Frame O(1), Scatter-Gather 64, 1 MiB Cap)    │
+│  UObject → UActor → UPawn → UCharacter · CustomMemory (TLS 캐시 메모리 풀) │
+│  RuntimeTrace (Off / FlightRecorder / AsyncStream → .cvtrace + .cvlog)     │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
-태현님이 AI에 질문하며 직접 구현하는 실제 프로젝트입니다. 1주일 동안 작은 2D 총게임을 목표로 만들고, 이후 3주 동안 3D 클라이언트로 확장합니다. 일정은 목표이며 미완료 항목은 기록합니다.
+### 계층 경계 및 책임 분리
+- **Core (`Core/Public`, `Core/Private`)**: 소켓 생명주기(`UListener`, `USession`), 스레드/네트워크/로그/방 매니저(`UCoreInstance` 소유), 게임 사물 기반 계층(`UObject → UActor → UPawn → UCharacter`), 크기별 메모리 풀(`CustomMemory`), 런타임 계측(`RuntimeTrace`). **Protobuf에 일절 의존하지 않습니다.**
+- **Server (`Server/Public`, `Server/Private`)**: 패킷 역직렬화·검증(`UServerSession::HandlePacket<TPacket>`), 채팅 도메인 규칙(`UGameRoom`, `UPlayer`, `ChatProtocolLimits.h`), 실행 진입점(`ServerApp`, `Main.cpp`). 소켓 API를 직접 호출하지 않습니다.
+- **Protocol (`Protocol/Schema`)**: 방향별 패킷 번호(`packet_type.proto`)와 도메인별 메시지(`login.proto`, `chat.proto`, `room.proto`) 단일 출처. `Build_Protocol.bat`으로 C++(`GameProtocol.lib`)과 C# 코드를 동시 생성하고 SHA-256 동기화를 검사합니다.
 
-## 지금 시작하기
+---
 
-- 솔루션: MultiplayerGame.sln, Visual Studio의 Debug | x64
-- 서버 · Core(DLL): Core/Public, Core/Private — 서버 네트워크 코드(리스너·세션·수신 버퍼·세션 관리)를 먼저 여기에 작성
-- 서버 · Server(EXE): Server/Default/Main.cpp, Server/Private/ServerApp.cpp — Core를 사용해 패킷 처리와 게임 규칙만 작성, 소켓 함수 직접 호출 없음
-- 클라 · C#: GameClient2D/Form1.cs — Core를 링크하지 않고 같은 패킷 형식만 맞춤, 통신 코드는 Form1과 분리한 클래스로 작성
-- 서버와 클라이언트의 약속: 패킷 목록 문서(종류 번호, 필드 순서·크기). 2일 차에 작성
-- GitHub 서버 교재: D:/__job/game-server-bootcamp-with-ai/02-phase2-network_kr.md (18일 차, 이후 21~22일 차)
+## 2. 핵심 설계 의사결정 5가지
 
-Core/Server는 기존 ServerFramework 작업본의 복사이며 출처는 SOURCE_ORIGIN.json에 있습니다. Server의 프로젝트 설정은 이전 준비 단계에서 AI가 Core 프로젝트 참조와 DLL 배치를 연결했습니다. 클라이언트는 .NET Windows Forms 기본 프로젝트로 생성했습니다. 어떤 부분을 태현님이 직접 작성하고 AI가 도왔는지는 진행하면서 기록합니다.
+1. **방 내부 무잠금 Strand 직렬화 (`Core::URoom` / `Server::UGameRoom`)**
+   - 방별 `ASIO::strand`에서 액터 컨테이너(`_ActorContainer`, O(1) swap-and-pop 인덱스 맵)와 닉네임 인덱스(`_NicknameIndex`)를 전담 처리해 **방 내부 `mutex`를 0개로 제거**했습니다.
+   - `Core::URoomManager`는 런타임 방 삭제를 허용하지 않는 Append-Only 정책으로 단일 `CONUNORMAP` 조회/등록을 무잠금으로 수행합니다.
+2. **브로드캐스트 O(N) → O(1) 공유 프레임 + Scatter-Gather + 25ms 인원 병합**
+   - `USession::MakePacketBuffer`로 `[4B 헤더 + 직렬화 본문]` 불변 버퍼를 1회만 생성하고 `SendShared` / `BroadcastSharedOnStrand`로 N명 세션에 공유합니다.
+   - `USession`은 대기 큐에서 최대 **64프레임**을 Scatter-Gather 배치 `async_write`로 묶어 시스템 콜 횟수를 줄이고, 느린 클라이언트의 송신 큐가 **1 MiB(1,048,576 B)**를 초과하면 Warning 로그를 남기고 즉시 연결을 차단합니다(백프레셔 보호).
+   - 1,000명 동시 입장/퇴장 폭주 시 `SC_ROOM_USER_COUNT`를 **25 ms Coalescing**으로 병합해 불필요한 폭주 패킷의 **98.54%**를 제거했습니다.
+3. **공용 `HandlePacket<TPacket>` & 명확한 오류/경고 정책**
+   - 패킷마다 중복 핸들러를 늘리지 않고 `UServerSession::HandlePacket<TPacket>`으로 역직렬화 경로를 단일화했습니다.
+   - 규칙 위반 채팅(빈 문자열·200자 초과·비정상 UTF-8)은 사유와 바이트 수를 Warning으로 기록하고 연결을 유지하며, 미정의 패킷 번호·Protobuf 파싱 실패·헤더 1,020 B 초과는 Warning 후 해당 연결만 즉시 닫습니다.
+4. **이중 관측 파이프라인 (`CVTRACE1` 이진 `.cvtrace` + JSONL `.cvlog`)**
+   - 네트워크 핫패스에는 256 B 고정 이진 슬롯(`Off` / `FlightRecorder` 16,384슬롯 / `AsyncStream` 4,096슬롯)만 기록하고, 운영 로그(`ULogger`)는 전용 워커 스레드 배치 콜백에서 동반 `.cvlog`를 기록해 `traceSeq`로 1:1 연결합니다.
+   - `/DCORE_ENABLE_RUNTIME_TRACE=0` 컴파일 스위치로 계측 코드를 완전히 제거(Zero-Cost)할 수 있습니다.
+5. **엄격한 코딩 규율과 서드파티 경고 격리**
+   - `AGENTS.md` 규칙(`friend` 전면 금지, 일반 `std::mutex` 금지 → `SHARED_MUTEX` + 읽기/쓰기 잠금 구분, `size_t` 대신 `uint64` 및 프로젝트 별칭 일관 사용)을 정적 검사로 강제하고, `Protocol/ServerProtocol.props`에 `<ExternalIncludePath>` + `/external:W0`를 적용해 우리 코드 `/W3` 검사를 유지한 채 **Debug/Release x64 경고 0건**을 달성했습니다.
 
-2026-11-07 준비 검증: Debug x64 솔루션 빌드 성공. 2026-11-08 06시 재확인: 같은 빌드가 성공했고, 서버가 `Server Start` → Enter → `Server Stop` → `End Server`를 출력한 뒤 종료 코드 0으로 끝났습니다. 준비 이후 C++·C# 소스는 바뀌지 않았습니다. C++ 서버는 시작·종료 뼈대이고 클라이언트는 빈 창입니다. 접속·게임플레이가 이미 구현됐다는 뜻이 아닙니다.
+---
 
-기존 Core에서 참고할 수 있는 것: `Core/Public/Packet.h`의 `FPacketHeader`(`type` 2바이트 다음 `size` 2바이트, 리틀 엔디안, 최대 512바이트), 공통 기반 `UCoreBase`(서버 ID, `MakeShared`·`ThisWeak`), ID 발급기 `UIDGenerator`, 전역 객체 `UCoreGlobal`, `UJobQueue`. `UPacket` 선언은 제거했으며 `Core/Private/Packet.cpp`에는 아직 구현이 없습니다. `UThreadManager`와 `UCoreInstance`는 재설계를 위해 빈 틀만 남아 있습니다. Core에는 아직 소켓 코드가 없습니다.
+## 3. 정량 실측 및 검증 결과 (x64 Release 기준)
 
-전체 일정과 날짜별 완료 기준: [30일 계획표](../../docs/03_3일_계획과_구조도.html) (2026-11-08 점검·수정)
+> 모든 수치는 [로그_설계_자료/로그_설계_기록.pdf](로그_설계_자료/로그_설계_기록.pdf) 478~491쪽에 기록된 실제 측정값입니다.
 
-## 1~3일 (11/8~11/10): 패킷 서버 목표
+### ① Phase 2 최적화 및 1,000명 규모 벤치마크 (480쪽)
+| 측정 항목 | 최적화 전 (Before) | 최적화 후 (After) | 개선 폭 |
+|---|---:|---:|---:|
+| RuntimeTrace 마이크로벤치 (8스레드, 200,000건) | 1,379.60 ms (`0.14 Mev/s`) | Off `1.77 ms` (`113.22 M/s`)<br>Flight `28.66 ms` (`6.98 M/s`)<br>Async `35.11 ms` (`5.70 M/s`) | Off **779×**<br>Flight **48.1×**<br>Async **39.3×** |
+| 1,000명 동시 로그인 폭주 (`TRACE_OFF`) | 1,738.97 ms (`CountPkts 358,919`) | **344.45 ms** (`CountPkts 5,247`) | **5.05×** (`-80.2%`)<br>패킷 **-98.54%** |
+| 1,000명 방 채팅 30×1,000 = 30,000건 전달 (`TRACE_OFF`) | 747.28 ms (`40.15 Kmsg/s`, Err 0) | **62.42 ms** (`480.59 Kmsg/s`, Err 0) | **11.97×** (`+1,097%`) |
+| 1,000명 + `FLIGHT` 트레이스 상시 ON | 미지원 | 로그인 `386.85 ms` (`5,871 pkt`)<br>채팅 `120.62 ms` (`248.71 Kmsg/s`) | 최적화 전 OFF 대비 채팅 **6.19×** |
+| 1,000명 + `ASYNC` 트레이스 상시 ON | 동기 기록 `3,103,827건` (`794.6 MB`) 크래시 (`orderlyEnd=F`) | 로그인 `355.09 ms` / 채팅 `115.36 ms` (`260.05 Kmsg/s`), `Err=0`, `orderlyEnd=True` | 로그인 **4.90×**<br>채팅 **6.48×** |
 
-3일 목표는 간단한 서버·클라이언트의 패킷 송수신입니다. 네트워크 게임 전체가 3일에 완성된다는 뜻은 아닙니다. 기간은 예상이며 미완료는 기록합니다. C# 통신 코드는 1일 차부터 `Form1`과 분리된 클래스로 작성해 3일 차 자동 시험, 2D, Unity를 고를 경우 3D에서 다시 씁니다.
+### ② 통합 안정성 · 백프레셔 · 크로스 언어 E2E 검증 (482·488~491쪽)
+- **다중 부하 + 중도 이탈 (489쪽)**: 120명 동시 접속(정상 100 · 중복 거절 10 · 규칙 위반 거절 10) + 40명 동시 이탈 + 잔류 60명 대상 채팅 200건 브로드캐스트 무손실 수신(`850.3 ms`).
+- **경고 정책 및 1 MiB 백프레셔 차단 (489쪽)**: 빈 채팅/201한글자/220영문자 경고 후 연결 유지, 깨진 Protobuf·미정의 999·헤더 1,021 B 초과 경고 후 즉시 차단, 비수신 `SlowReader` 1 MiB 송신 큐 초과 강제 차단(`.cvlog` 실측).
+- **C++ 서버 ↔ C# WinForms 클라이언트 E2E (482·490·491쪽)**: 한글 닉네임·중복/규칙 거절·3바이트 분할/2패킷 병합 프레이밍·25명 20명 단위 페이징·양방향 채팅·`CVTRACE1`/`.cvlog` 실행 추적 모두 PASS.
+- **빌드 & Core 계약 시험 (488~491쪽)**: `Debug|x64` · `Release|x64` 모두 **오류 0 / 경고 0**, `ListenerContracts`(7/7) · `LoggerContracts`(3/3) · `MemoryContracts`(7/7) 전항목 PASS.
 
-1일 (11/8), 교재 Phase 2 18일 차(`L2-CPP-01`, `L2-C-01`)
-- 서버 · Core: `winsock2.h` 포함 순서와 `Ws2_32.lib` 연결, Winsock 초기화·정리, 리스너(`bind`·`listen`·접속 스레드), 세션(`ACoreBase` 상속, 수신 스레드, 부분 송신 반복, `recv` 0이면 종료), Server에 접속·수신·종료를 알리는 방식 결정
-- 서버 · Server: `ServerApp::Start()`·`Stop()`은 Core 리스너 시작·정지만 호출, 에코 처리
-- 클라 · C#: 통신 클래스(접속·수신 스레드·송신), `Form1` 임시 입력칸
-- 완료 기준: 문자열 왕복, `ServerApp.cpp`에 소켓 함수 호출 없음, Enter 종료 시 종료 코드 0과 누수 보고 없음
+---
 
-2일 (11/9), 교재 20일 차, 21~22일 차(`L2-C-07`·`08`·`10`)
-- 서버 · Core: 세션 수신 버퍼로 기존 `FPacketHeader` 기준 분리, 완전한 패킷만 Server에 전달, `size`를 몸통 크기로 해석, 크기 초과 시 그 세션만 종료, 송수신을 공통 세션에서 담당하는 방향 검토
-- 서버 · Server: 패킷 종류별 처리 함수, 패킷 목록 문서 작성
-- 클라 · C#: 같은 머리말 순서·리틀 엔디안으로 쓰기·읽기, 분할·병합 시험용 송신
-- 완료 기준: 분할·병합 수신을 각각 처리, 크기 초과 시 그 연결만 종료, 패킷 목록 문서 있음
+## 4. 프로토콜 요약 (`Protocol/Schema`)
 
-3일 (11/10), 교재 26·31일 차, `L2-C-19`
-- 서버 · Core: 세션 관리(`UIDGenerator` ID, `mutex` 보호 목록, 전체 전송), 종료 순서(새 접속 차단 → 세션 닫기 → 스레드 정리)
-- 서버 · Server: 입장·퇴장 알림, 채팅 전체 전송
-- 클라 · C#: 입장·퇴장·채팅 표시, 자동 시험 모드 10개
-- 완료 기준: 10개 접속과 상호 수신, 하나씩 끊어도 서버 유지. 연결만 확인한 경우와 데이터 왕복 성공은 구분해 기록
+TCP 프레임 형식: `[uint16 type (LE)] [uint16 size (LE)] [Protobuf Body (0..1,020 B)]` (총 최대 1,024 B)
 
-## 4~7일 (11/11~11/14): 2D 게임 목표
+| 방향 | 패킷 Enum | 번호 | 메시지 | 설명 / 한도 |
+|---|---|---:|---|---|
+| C → S | `CS_LOGIN` | 1 | `CSLogin` | 닉네임 2~12자(완성형 한글·영문·숫자), 중복 시 거절 |
+| C → S | `CS_CHAT` | 2 | `CSChat` | 채팅 본문 1~200자 UTF-8 (초과 시 Warning, 연결 유지) |
+| C → S | `CS_ROOM_USERS` | 3 | `CSRoomUsers` | `offset` 기준 참가자 목록 요청 |
+| S → C | `SC_LOGIN_RESULT` | 1 | `SCLoginResult` | `ELoginResult` + 현재 방 인원 수 |
+| S → C | `SC_CHAT` | 2 | `SCChat` | 발신자 닉네임 + 채팅 본문 (방 전체 브로드캐스트) |
+| S → C | `SC_ROOM_USER_COUNT` | 3 | `SCRoomUserCount` | 25 ms 병합 인원 수 알림 (최대 1,000명) |
+| S → C | `SC_ROOM_USERS` | 4 | `SCRoomUsers` | 최대 20명 닉네임 목록 + `total` |
 
-게임 규칙은 Server에, 화면·입력은 C#에 둡니다. 4일 차부터 Core는 고치지 않는 것이 목표이며, 고쳤다면 이유를 기록합니다.
+---
 
-4일 (11/11): 서버 — 플레이어 목록·위치, 게임 루프(예: 20Hz) 한 스레드만 상태 변경, 기존 `JobQueue` 사용 가능 여부 확인, 방향만 받아 속도 제한 후 전체 전송. 클라 — 방향키 이동 요청, `BeginInvoke`로 UI 전달, 임시 도형 그리기. 교재 Phase 2 28일 차, Phase 3 37·38일 차, 심화 3-3b.
-5일 (11/12): 서버 — 명중 방식 결정, 발사·피해·탄약·장전 판정. 클라 — 마우스 방향 발사, 장전 키, 체력·탄약 표시. 교재 Phase 3 44일 차.
-6일 (11/13): 서버 — 아이템 1종, 사망, 최후 생존자, 대기 → 진행 → 종료. 클라 — 아이템·사망·승자 표시. 교재 Phase 3 39일 차.
-7일 (11/14): 서버 — 끊김·잘못된 패킷 시험, Core·Server 경계 점검. 클라 — 자동 시험 모드 10개로 이동·발사 시험, 3D 엔진 실행 확인과 결정. 늦어지면 아이템을 먼저 뺍니다.
+## 5. 빌드 · 실행 · 원클릭 재현 검증
 
-선택한 수치: 체력 100, 탄창 10발, 피해 25, 장전 2초. 10명은 첫 시험 목표이며 실제 10인 원격 접속을 검증했다는 뜻이 아닙니다. 명중 방식은 5일 차 시작, 아이템 종류는 6일 차 시작, 3D 엔진은 7일 차에 정합니다.
+### 사전 준비
+- Visual Studio 2022/2026 C++ 도구(`v145`, x64), Python 3.10+, Boost 1.92.0 헤더(`ThirdParty/boost_1_92_0` 또는 `-p:BoostIncludeDir=...`).
 
-## 8~28일 (11/15~12/5): 3D 확장 목표
+### 1) 프로토콜 생성 및 서버 빌드
+```bat
+Build_Protocol.bat Release
+Update_Core_Server.bat Release
+```
 
-서버 판정은 2D와 같은 평면 좌표를 그대로 쓰고, 3D에서는 높이를 표시에만 씁니다. 점프·높이 판정·물리는 넣지 않습니다. 각 주의 토요일(14·21·28일 차)은 예비일입니다.
+### 2) 서버 실행
+```bat
+Server\Bin\Release\ServerApp.exe 4 7777 --trace=stream
+```
+- 인자: `ServerApp.exe <네트워크 워커 수> <포트> [--trace=stream|flight|off]` (`127.0.0.1:<포트>` 바인딩, `Enter` 키로 정상 종료)
+- 트레이스 모드 생략 시 기본값은 `--trace=stream`이며, 성능 측정 전용 실행 시 `--trace=off`를 지정합니다.
 
-서버는 그대로 두고 클라이언트만 3D로 새로 만드는 것이 목표입니다. 4주 차에 서버 대기 주소를 실행 인자로 바꿀 수 있게 하고(127.0.0.1 / 0.0.0.0) 다른 PC 접속을 시험합니다.
+### 3) 원클릭 E2E · 부하 · 백프레셔 재현 검증
+```bat
+python tools\run_e2e_verify.py
+```
+- 외부 Python 패키지 없이 표준 라이브러리만으로 `ServerApp.exe`를 임시 포트에 띄워 **로그인/중복/규칙 거절 · TCP 1B 분할/2패킷 병합 · 25명 페이징 · 경고/차단 5종 · 100명 동시 부하/이탈 · 1 MiB SlowReader 백프레셔 · 정상 종료 및 `.cvtrace`/`.cvlog` 검증**을 한 번에 재현합니다.
 
-2주 차 (11/15~11/21): 평면 맵·임시 캐릭터·카메라, 통신 연결, 여러 플레이어 이동과 보간. 완료 기준: 3D 클라이언트 2개와 2D 클라이언트 1개가 같은 서버에서 서로의 이동을 봅니다.
-3주 차 (11/22~11/28): 조준·발사, 체력·탄약·장전 UI, 피격·사망 표시.
-4주 차 (11/29~12/5): 아이템·승리, 자동 클라이언트와 3D 혼합 시험, 가능하면 같은 네트워크의 다른 PC 접속, 시연 영상과 실행 방법.
-29~30일 (12/6~12/7): 미해결 오류와 실측 결과 정리, 지원·면접 자료 보완.
-
-Unity는 과거 라이선스 관련 오류가 보고되었고 이번에 3D 빌드는 검증하지 않았습니다. Windows Forms 화면 코드가 Unity에서 자동으로 동작하는 것은 아니며 클라이언트 연결과 화면을 별도로 구현하고 시험해야 합니다.
-
-개발·서류 작업과 지원·이론/면접은 09:00~21:00 중 각각 5시간·2시간·3시간을 목표로 병행하고 식사·휴식 2시간을 둡니다. 30일 동안 IOCP 전환, 메모리 풀·작업 큐의 새 기능, C#에서 C++ Core 호출, DB·로그인·재접속은 하지 않습니다.
-
-
-## Core 회귀 시험 (2026-11-13)
-
-Visual Studio C++ 도구(v145)와 프로젝트의 `ThirdParty/boost_1_92_0`이 필요합니다. 개발자 명령 프롬프트에서 프로젝트 폴더를 기준으로 실행합니다. `Debug` 대신 `Release`를 지정할 수 있습니다.
-
+### 4) Core 계약 단위 시험
 ```bat
 msbuild Tests\MemoryContracts.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64
 Tests\.build\Debug\bin\MemoryContracts.exe
 msbuild Tests\LoggerContracts.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64
 Tests\.build\LoggerContracts\Debug\bin\LoggerContracts.exe
-```
-
-두 프로젝트는 필요한 현재 Core 소스를 시험 실행 파일에 직접 컴파일합니다. 기존 서버 실행 파일이나 Core DLL을 교체하지 않으며 DLL ABI 호환성은 시험하지 않습니다. `MemoryContracts`는 할당 경계·정렬·재사용·다중 스레드와 다른 스레드에서 반환을 확인합니다. `LoggerContracts`는 채널의 64건·100ms 경계, 종료 전 부분 묶음 출력, 두 생산자의 메시지 누락·중복과 생산 완료 후 종료 수거를 확인합니다. 비동기 출력 시험의 3초는 시험 제한 시간이며 100ms 내 출력 보장은 아닙니다.
-
-실제 디스크 장애, OS 할당 실패, 네트워크 부하는 시험 범위가 아닙니다. 기존 `MemoryWalkthrough`와 `ThreadSchedulerTests`는 과거 API와 삭제된 소스를 참조하는 별도 오래된 프로젝트이며 위 시험에 포함되지 않습니다.
-
-## 리스너 회귀 시험 (2026-11-13)
-
-`UListener`는 별도 접속 수락 추상 클래스입니다. 주소와 포트는 호출자가 전달하고, 수락 소켓은 파생 클래스의 `HandleAcceptedSocket(TCPSOCKET)`으로 이동해 전달합니다. 수락 오류는 오류 콜백을 호출한 후 중단하며 종료 요청에 따른 취소는 오류로 전달하지 않습니다.
-
-```bat
 msbuild Tests\ListenerContracts.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64
 Tests\.build\ListenerContracts\Debug\bin\ListenerContracts.exe
 ```
+> **참고 (보존/예약 항목)**: `Tests/` 내 `MemoryWalkthrough`, `ThreadSchedulerTests`, `SessionContracts`는 초기 구버전 API를 참조하는 아카이브 프로젝트로 현재 회귀 시험 대상이 아닙니다. `Core/Public/UJobQueue.h`는 추후 게임 루프 확장용으로 보존된 예약 클래스입니다.
 
-Release 시험은 두 명령의 Debug를 Release로 바꿉니다. 시험 프로젝트는 Core 소스를 실행 파일에 직접 컴파일하며, 로컬 접속·포트 충돌·종료 경합·콜백 예외를 확인합니다. 시험 포트는 별도 수락기로 빈 포트를 확인한 후 사용하므로, 확인과 리스너의 바인딩 사이에 다른 프로세스가 그 포트를 선점할 가능성은 있습니다.
+---
 
-`Stop()`은 이미 전달 대상으로 확정되었거나 실행 중인 파생 함수와 실패 콜백이 끝날 때까지 기다리지 않습니다. 호출자는 이들이 참조하는 객체와 io_context를 관련 완료 핸들러 및 워커 종료까지 유지해야 합니다. Start()는 워커 실행 전 제어 스레드에서 호출합니다. 시작에 성공한 리스너 객체는 재시작하지 않습니다. `ServerApp`은 `ServerApp <네트워크 워커 수> <포트>`로 실행하며, `127.0.0.1:<포트>`에서 `UServerListener`로 접속을 받습니다. 접속마다 `UServerSession`을 만들어 `UNetworkManager`에 등록하고 수신을 시작합니다. 아직 정해진 패킷이 없어 받은 패킷은 Warning으로 기록하고 그 연결을 닫습니다. accept 오류가 나면 Error로 기록하고 서버를 종료합니다.
+## 6. 프로젝트 폴더 구조
+
+- `Core/` — 공통 네트워크·메모리 풀·비동기 로거·액터/방 기반·런타임 트레이스 DLL
+- `Server/` — 채팅 서버 애플리케이션(`ServerApp`, `UServerListener`, `UServerSession`, `UGameRoom`, `UPlayer`)
+- `Protocol/` — `.proto` 스키마, `Build_Protocol.bat` 생성 파이프라인, `ServerProtocol.props`(`/external:W0`)
+- `Tests/` — Core 계약 회귀 시험(`MemoryContracts`, `LoggerContracts`, `ListenerContracts`)
+- `tools/` — 프로토콜 빌드/검증 스크립트 및 원클릭 E2E 재현기(`run_e2e_verify.py`)
+- `로그_설계_자료/` — 설계·의사결정·실측 기록(`로그_설계_기록.pdf`, 491쪽, 대용량으로 Git 제외)

@@ -18,7 +18,7 @@ void UMPRuntimeMetrics::Reset()
 {
 	for(auto& metricIndex : _MpMetricsIndexArray)
 	{
-		metricIndex.store(0);
+		metricIndex.Value.store(0, std::memory_order_relaxed);
 	}
 }
 
@@ -27,18 +27,18 @@ void UMPRuntimeMetrics::RecordMPMetrics(EMemoryPoolMetricIndex eMemoryPoolMetric
 	// 색인 타입이 부호 없는 열거형이므로 상한만 확인한다.
 	if(eMemoryPoolMetricIndex < EMemoryPoolMetricIndex::MaxIndex)
 	{
-		_MpMetricsIndexArray[eMemoryPoolMetricIndex].fetch_add(1);
+		_MpMetricsIndexArray[eMemoryPoolMetricIndex].Value.fetch_add(1, std::memory_order_relaxed);
 	}
 }
 
 FMPRuntimeMetricsSnapshot UMPRuntimeMetrics::ReadSnapshot() const
 {
 	return FMPRuntimeMetricsSnapshot{
-		.ThreadCacheHitCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryThreadCacheHit].load(),
-		.CentralQueueHitCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryCentralQueueHit].load(),
-		.SystemAllocationCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemorySystemAllocation].load(),
-		.ReturnedToThreadCacheCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryReturnedToThreadCache].load(),
-		.ReturnedToCentralQueueCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryReturnedToCentralQueue].load()
+		.ThreadCacheHitCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryThreadCacheHit].Value.load(std::memory_order_relaxed),
+		.CentralQueueHitCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryCentralQueueHit].Value.load(std::memory_order_relaxed),
+		.SystemAllocationCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemorySystemAllocation].Value.load(std::memory_order_relaxed),
+		.ReturnedToThreadCacheCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryReturnedToThreadCache].Value.load(std::memory_order_relaxed),
+		.ReturnedToCentralQueueCount = _MpMetricsIndexArray[EMemoryPoolMetricIndex::MemoryReturnedToCentralQueue].Value.load(std::memory_order_relaxed)
 	};
 }
 

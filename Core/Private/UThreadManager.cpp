@@ -74,6 +74,8 @@ bool UThreadManager::RegisterFunc(THREADFUNC Work, void* Data)
 			// MSVC의 종료 처리기는 스레드마다 따로 설정되므로 이 스레드에서 설정한다.
 			std::set_terminate(ReportUnhandledWorkerException);
 			Work(Data);
+			// 워커 종료 전 스레드 로컬 메모리 캐시를 중앙 풀로 반환해 재사용 경로를 보장한다.
+			GThreadMemoryCache.FlushToCentral();
 			RUNTIME_TRACE_EVENT(Destroy, THREAD, RegisterFunc, worker.Get());
 		});
 		return true;

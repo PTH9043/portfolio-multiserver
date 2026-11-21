@@ -25,6 +25,9 @@ struct FMemoryLayout final
 		(512 / 16) + (1024 / 32) + (1024 / 128) + (2048 / 256)
 	};
 	STATIC_CONSTEXPR uint64 MaxPooledAllocationSize{ 4608 };
+	// 중앙 풀 버킷 하나가 재사용 대기열에 유지할 최대 총 바이트다. 초과 반납분은 OS로 즉시 반환해 피크 고착을 막는다.
+	STATIC_CONSTEXPR uint64 MaxCentralCachedBytesPerPool{ 4ull * 1024ull * 1024ull };
+	STATIC_CONSTEXPR uint64 MinCentralCachedBlocksPerPool{ 64 };
 };
 
 // Worker 하나가 반환된 block을 무제한 보관하지 못하도록 제한합니다.
@@ -44,8 +47,8 @@ UMemoryHeader
 -------------------------------
 */
 
-// 
-class ALIGNAS(uint64) UMemoryHeader final
+// x64 malloc의 16바이트 정렬을 사용자 페이로드 주소(mHeader + 1)까지 그대로 보존한다.
+class ALIGNAS(16) UMemoryHeader final
 {
 public:
 	explicit UMemoryHeader(uint64 allocSize = 0);
@@ -79,12 +82,15 @@ public:
 
 private:
 	ATOMIC_UINT64 _allocSize;
+	// 16바이트 정렬 패딩을 명시해 /W4 C4324 경고를 방지한다.
+	uint64 _padding{ 0 };
 };
 
 // 현재 헤더의 크기를 기록한다.
 STATIC_CONSTEXPR uint64 MEMORYHEADER_SIZE{ sizeof(UMemoryHeader) };
-// 현재 헤더의 크기가 8바이트 배수인지 확인한다. (메모리의 정렬 확인)
-static_assert(0 == sizeof(UMemoryHeader) % alignof(uint64));
+// 헤더가 16바이트 정렬과 std::max_align_t 배수 조건을 모두 만족하는지 컴파일 시점에 확인한다.
+static_assert(16 == sizeof(UMemoryHeader));
+static_assert(0 == sizeof(UMemoryHeader) % alignof(std::max_align_t));
 
 /*
 -------------------------------
@@ -113,6 +119,8 @@ public:
 private:
 	uint64			_BlockSize;
 	uint32			_PoolIndex;
+	uint64			_MaxCentralBlocks{ 0 };
+	ATOMIC_UINT64	_QueuedBlockCount{ 0 };
 	concurrency::concurrent_queue<UMemoryHeader*> _CentralQueue;
 };
 

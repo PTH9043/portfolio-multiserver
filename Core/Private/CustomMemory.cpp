@@ -28,6 +28,11 @@ UMemoryPool::UMemoryPool(const uint64 blockSize, const uint32 poolIndex) :
 	{
 		throw std::invalid_argument{ "pool block is smaller than UMemoryHeader" };
 	}
+
+	const uint64 byBytes{ FMemoryLayout::MaxCentralCachedBytesPerPool / _BlockSize };
+	_MaxCentralBlocks = (byBytes > FMemoryLayout::MinCentralCachedBlocksPerPool)
+		? byBytes
+		: FMemoryLayout::MinCentralCachedBlocksPerPool;
 }
 
 UMemoryPool::~UMemoryPool() 
@@ -37,11 +42,19 @@ UMemoryPool::~UMemoryPool()
 	{
 		std::free(pMemoryHeader);
 	}
+	_QueuedBlockCount.store(0, std::memory_order_relaxed);
 }
 
 void UMemoryPool::Push(UMemoryHeader* pMemoryHeader) noexcept
 { 
 	RETURN_INVALID_COND(nullptr == pMemoryHeader, );
+	// 버킷 상한을 넘긴 여유 블록은 중앙 큐에 무한 보관하지 않고 OS로 즉시 반환한다.
+	if (_QueuedBlockCount.load(std::memory_order_relaxed) >= _MaxCentralBlocks)
+	{
+		std::free(pMemoryHeader);
+		return;
+	}
+	_QueuedBlockCount.fetch_add(1, std::memory_order_relaxed);
 	_CentralQueue.push(pMemoryHeader);
 }
 
@@ -51,6 +64,7 @@ UMemoryHeader* UMemoryPool::Pop()
 	UMemoryHeader* mHeader{ nullptr };
 	if (_CentralQueue.try_pop(mHeader))
 	{
+		_QueuedBlockCount.fetch_sub(1, std::memory_order_relaxed);
 		// MemoryCentralQueueHit는 중앙 큐에서 블록을 가져온 횟수
 		RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemoryCentralQueueHit);
 		return mHeader;
