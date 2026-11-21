@@ -32,6 +32,7 @@ UGameRoom::~UGameRoom()
 	RUNTIME_TRACE_EVENT(Destroy, UGameRoom, ~UGameRoom, GetRuntimeTraceID());
 }
 
+// 방 strand에서 닉네임 중복·정원·세션 유효성을 판정해 플레이어를 입장시키고 결과를 통보한다.
 bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUNC<void(EEnterResult, Core::uint32)> onComplete)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, RequestEnterPlayer, GetRuntimeTraceID());
@@ -81,6 +82,7 @@ bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUN
 	});
 }
 
+// 방 소속 플레이어의 채팅 메시지를 SC_CHAT으로 직렬화해 방 전체에 브로드캐스트한다.
 bool UGameRoom::RequestBroadcastChat(const Core::SHPTR<UPlayer>& sender, Core::FString text)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, RequestBroadcastChat, GetRuntimeTraceID());
@@ -107,6 +109,7 @@ bool UGameRoom::RequestBroadcastChat(const Core::SHPTR<UPlayer>& sender, Core::F
 	});
 }
 
+// 요청자의 offset부터 한 페이지(ROOM_USERS_PAGE_SIZE) 분량의 닉네임 목록을 응답한다.
 bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::uint32 offset)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, RequestRoomUsers, GetRuntimeTraceID());
@@ -149,6 +152,7 @@ bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::ui
 	});
 }
 
+// 방 입장 전 닉네임 중복 여부를 확인한다.
 bool UGameRoom::CanEnter(const Core::SHPTR<Core::UActor>& actor) const
 {
 	if (!actor)
@@ -161,6 +165,7 @@ bool UGameRoom::CanEnter(const Core::SHPTR<Core::UActor>& actor) const
 	return true;
 }
 
+// 입장 완료 시 닉네임 인덱스에 등록하고 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorEntered(const Core::SHPTR<Core::UActor>& actor)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorEntered, GetRuntimeTraceID());
@@ -172,6 +177,7 @@ void UGameRoom::OnActorEntered(const Core::SHPTR<Core::UActor>& actor)
 		ScheduleUserCountBroadcastOnStrand();
 }
 
+// 퇴장 완료 시 닉네임 인덱스에서 제거하고 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorLeft(const Core::SHPTR<Core::UActor>& actor)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorLeft, GetRuntimeTraceID());
@@ -182,6 +188,7 @@ void UGameRoom::OnActorLeft(const Core::SHPTR<Core::UActor>& actor)
 	ScheduleUserCountBroadcastOnStrand();
 }
 
+// 짧은 간격 내 여러 입·퇴장을 하나의 인원 수 브로드캐스트로 병합 예약한다.
 void UGameRoom::ScheduleUserCountBroadcastOnStrand()
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, ScheduleUserCountBroadcastOnStrand, GetRuntimeTraceID());
@@ -202,6 +209,7 @@ void UGameRoom::ScheduleUserCountBroadcastOnStrand()
 	});
 }
 
+// 예약된 타이머 만료 시 현재 방 인원 수를 1회 프레임화해 전체 방송한다.
 void UGameRoom::FlushUserCountOnStrand()
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, FlushUserCountOnStrand, GetRuntimeTraceID());
@@ -224,6 +232,7 @@ void UGameRoom::FlushUserCountOnStrand()
 		BroadcastSharedOnStrand(framedBuffer);
 }
 
+// Protobuf 패킷 크기를 검사하고 스택 버퍼로 직렬화한다.
 template<class TPacket>
 bool UGameRoom::SerializePacket(Core::uint16 packetType, const TPacket& packet,
 	Core::ARRAY<Core::uint8, Core::PACKET_MAX_BODY_SIZE>& outBuffer, Core::uint64& outSize) const

@@ -8,10 +8,8 @@
 
 #include "packet_type.pb.h"
 #include "login.pb.h"
-#include "chat.pb.h"
 #include "room.pb.h"
 
-#include <cstring>
 #include <string>
 #include <utility>
 
@@ -34,58 +32,49 @@ UServerSession::~UServerSession()
 	RUNTIME_TRACE_EVENT(Destroy, UServerSession, ~UServerSession, GetRuntimeTraceID());
 }
 
-void UServerSession::ProcessingData(Core::uint8* packetData, Core::uint64 packetSize)
+// 로그인 전(소유자 미부착) 상태에서 들어온 패킷만 처리하고, 미인증 도메인 패킷은 차단한다.
+void UServerSession::OnUnboundPacket(const Core::FPacketView& packet)
 {
-	RUNTIME_TRACE_SCOPE(UServerSession, ProcessingData, GetRuntimeTraceID());
-	Core::FPacketHeader header{};
-	std::memcpy(&header, packetData, Core::PACKET_HEADER_SIZE);
-
-	// USession::CombinePacket이 머리말의 본문 크기를 PACKET_MAX_BODY_SIZE 안으로 확인한 뒤 넘긴다.
-	const Core::uint8* body{ packetData + Core::PACKET_HEADER_SIZE };
-	const Core::uint64 bodySize{ packetSize - Core::PACKET_HEADER_SIZE };
-
-	switch (header.type) {
+	RUNTIME_TRACE_SCOPE(UServerSession, OnUnboundPacket, GetRuntimeTraceID());
+	switch (packet.GetType()) {
 	case Protocol::CS_LOGIN:
-		HandlePacket<Protocol::CSLogin>(header.type, body, bodySize);
+		HandlePacket<Protocol::CSLogin>(packet);
 		break;
 	case Protocol::CS_CHAT:
-		HandlePacket<Protocol::CSChat>(header.type, body, bodySize);
-		break;
 	case Protocol::CS_ROOM_USERS:
-		HandlePacket<Protocol::CSRoomUsers>(header.type, body, bodySize);
+		RejectPacket(packet.GetType(), "not logged in");
 		break;
 	default:
-		RejectPacket(header.type, "undefined packet type");
+		RejectPacket(packet.GetType(), "undefined packet type");
 		break;
 	}
 }
 
+// 연결 종료 시 진행 중인 로그인 대기 상태를 해제한다.
 void UServerSession::OnDisconnected()
 {
 	RUNTIME_TRACE_SCOPE(UServerSession, OnDisconnected, GetRuntimeTraceID());
 	_Disconnected = true;
 	_LoginPending = false;
-	const auto player = std::move(_Player);
-	const auto gameRoom = std::move(_GameRoom);
-	if (player && gameRoom)
-		gameRoom->RequestLeave(player);
 }
 
+// 로그인 전 패킷을 역직렬화하고 실패 시 연결을 닫는다.
 template<class TPacket>
-void UServerSession::HandlePacket(Core::uint16 packetType, const Core::uint8* body, Core::uint64 bodySize)
+void UServerSession::HandlePacket(const Core::FPacketView& packetView)
 {
 	RUNTIME_TRACE_SCOPE(UServerSession, HandlePacket, GetRuntimeTraceID());
-	// bodySize는 PACKET_MAX_BODY_SIZE(1020) 이하라 int로 바꿔도 값이 잘리지 않는다.
+	// packetView.GetSize()는 PACKET_MAX_BODY_SIZE(1020) 이하라 int로 바꿔도 값이 잘리지 않는다.
 	// proto3 string이 UTF-8이 아니어도 해석에 실패한다.
 	TPacket packet;
-	if (!packet.ParseFromArray(body, static_cast<int>(bodySize))) {
-		RejectPacket(packetType, "parse failed");
+	if (!packet.ParseFromArray(packetView.GetData(), static_cast<int>(packetView.GetSize()))) {
+		RejectPacket(packetView.GetType(), "parse failed");
 		return;
 	}
 
 	OnPacket(packet);
 }
 
+// 로그인 응답 등 서버 패킷을 직렬화해 송신한다.
 template<class TPacket>
 void UServerSession::SendPacket(Core::uint16 packetType, const TPacket& packet)
 {
@@ -117,11 +106,12 @@ void UServerSession::SendPacket(Core::uint16 packetType, const TPacket& packet)
 	Send(bodySize == 0 ? nullptr : buffer.data(), bodySize, packetType);
 }
 
+// 닉네임 검증 후 UPlayer를 생성·부착하고 기본 게임 방에 비동기 입장을 요청한다.
 void UServerSession::OnPacket(const Protocol::CSLogin& packet)
 {
 	RUNTIME_TRACE_SCOPE(UServerSession, OnPacket, GetRuntimeTraceID());
 	Protocol::SCLoginResult response;
-	if (_Player || _LoginPending) {
+	if (HasOwner() || _LoginPending) {
 		response.set_result(Protocol::LOGIN_RESULT_ALREADY_LOGGED_IN);
 		SendPacket(Protocol::SC_LOGIN_RESULT, response);
 		return;
@@ -145,7 +135,11 @@ void UServerSession::OnPacket(const Protocol::CSLogin& packet)
 
 	const auto self = ThisShared<UServerSession>();
 	FPlayerInfo info{ Core::FString{ nickname } };
-	const auto player = Core::MakeShared<UPlayer>(coreInstance, std::move(info), ThisWeak<Core::USession>());
+	const auto player = Core::MakeShared<UPlayer>(coreInstance, std::move(info));
+	if (!player->AddComponent(self)) {
+		RejectPacket(Protocol::CS_LOGIN, "failed to attach session component");
+		return;
+	}
 	_LoginPending = true;
 
 	const bool posted = gameRoom->RequestEnterPlayer(player,
@@ -160,41 +154,7 @@ void UServerSession::OnPacket(const Protocol::CSLogin& packet)
 	}
 }
 
-void UServerSession::OnPacket(const Protocol::CSChat& packet)
-{
-	RUNTIME_TRACE_SCOPE(UServerSession, OnPacket, GetRuntimeTraceID());
-	if (!_Player || !_GameRoom) {
-		RejectPacket(Protocol::CS_CHAT, "not logged in");
-		return;
-	}
-
-	const Core::STRINGVIEW text{ packet.text() };
-	const EChatTextError textError = ValidateChatText(text);
-	if (textError != EChatTextError::None) {
-		const auto coreInstance = GetCoreInstance();
-		const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
-		if (logger) {
-			Core::FString message{ "UServerSession ignored invalid chat text (" };
-			message << GetChatTextErrorReason(textError) << ", " << std::to_string(text.size()) << " bytes)";
-			logger->TryLog(Core::ELogLevel::Warning, message.View());
-		}
-		return;
-	}
-
-	_GameRoom->RequestBroadcastChat(_Player, Core::FString{ text });
-}
-
-void UServerSession::OnPacket(const Protocol::CSRoomUsers& packet)
-{
-	RUNTIME_TRACE_SCOPE(UServerSession, OnPacket, GetRuntimeTraceID());
-	if (!_Player || !_GameRoom) {
-		RejectPacket(Protocol::CS_ROOM_USERS, "not logged in");
-		return;
-	}
-
-	_GameRoom->RequestRoomUsers(_Player, packet.offset());
-}
-
+// 비동기 방 입장 결과를 클라이언트에 응답하고, 도중 연결이 끊겼으면 즉시 방 퇴장을 요청한다.
 void UServerSession::OnEnterRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom, const Core::SHPTR<UPlayer>& player,
 	UGameRoom::EEnterResult result, Core::uint32 userCount)
 {
@@ -212,8 +172,7 @@ void UServerSession::OnEnterRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom
 	Protocol::SCLoginResult response;
 	switch (result) {
 	case UGameRoom::EEnterResult::Success: {
-		_Player = player;
-		_GameRoom = gameRoom;
+		player->SetGameRoom(gameRoom);
 		response.set_result(Protocol::LOGIN_RESULT_SUCCESS);
 		response.set_user_count(userCount);
 		SendPacket(Protocol::SC_LOGIN_RESULT, response);
@@ -240,6 +199,7 @@ void UServerSession::OnEnterRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom
 	SendPacket(Protocol::SC_LOGIN_RESULT, response);
 }
 
+// 프로토콜 위반 사유를 경고 기록하고 세션을 닫는다.
 void UServerSession::RejectPacket(Core::uint16 packetType, Core::STRINGVIEW reason)
 {
 	RUNTIME_TRACE_SCOPE(UServerSession, RejectPacket, GetRuntimeTraceID());

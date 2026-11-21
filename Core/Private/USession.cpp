@@ -1,5 +1,6 @@
 #include "CoreDefine.h"
 #include "USession.h"
+#include "UPawn.h"
 #include "UCoreInstance.h"
 #include "ULogger.h"
 #include <boost/asio/bind_executor.hpp>
@@ -17,7 +18,7 @@
 SPACE_H(Core)
 
 USession::USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket)
-    : UObject{ std::move(coreInstance) },
+    : UComponent{ std::move(coreInstance) },
       _Socket{ std::move(socket) },
       _Strand{ ASIO::make_strand(_Socket.get_executor()) }
 {
@@ -147,6 +148,17 @@ bool USession::PostToSession(FUNC<void()> task)
     return true;
 }
 
+void USession::ProcessingData(const FPacketView& packet)
+{
+    RUNTIME_TRACE_SCOPE(USession, ProcessingData, GetRuntimeTraceID());
+    if (const auto owner = GetOwner()) {
+        owner->OnReceivePacket(packet);
+        return;
+    }
+
+    OnUnboundPacket(packet);
+}
+
 void USession::OnDisconnected()
 {
 }
@@ -230,6 +242,8 @@ void USession::CloseConnection()
     if (!_DisconnectedNotified) {
         _DisconnectedNotified = true;
         OnDisconnected();
+        if (const auto owner = GetOwner())
+            owner->OnSessionDisconnected();
     }
 }
 
@@ -277,10 +291,12 @@ void USession::CombinePacket(const BOOST_ERROR_CODE& error, uint64 receivedBytes
         if (_ReceivedBytes - processedBytes < packetSize)
             break;
 
-        // 파생 클래스의 처리 실패는 이 연결만 끊는다. 예외가 워커 밖으로 나가면 서버 전체가 종료된다.
+        // 패킷 처리 실패는 이 연결만 끊는다. 예외가 워커 밖으로 나가면 서버 전체가 종료된다.
         // 닫은 Session은 다시 수신하지 않으므로 수신 버퍼를 정리하지 않고 반환한다.
         try {
-            ProcessingData(_ReceiveBuffer.data() + processedBytes, packetSize);
+            const uint8* body{ _ReceiveBuffer.data() + processedBytes + PACKET_HEADER_SIZE };
+            const FPacketView packet{ header.type, body, header.size };
+            ProcessingData(packet);
         }
         catch (const std::exception& exception) {
             CloseOnProcessingFailure(exception.what());

@@ -3,7 +3,15 @@
 #include "CoreDefine.h"
 #include "UCharacter.h"
 
+namespace multiplayer::protocol {
+class CSLogin;
+class CSChat;
+class CSRoomUsers;
+}
+
 SPACE_H(Server)
+
+class UGameRoom;
 
 // 플레이어의 공용 식별·프로필 정보 구조체다.
 // 닉네임에 한정하지 않고 추후 계정 ID·등급·상태 등 공용 속성을 확장해 함께 전달·보관한다.
@@ -11,24 +19,45 @@ struct FPlayerInfo {
 	Core::FString Nickname;
 };
 
-// 플레이어가 조종하는 사물이다. 통신이 필요한 액터로서 생성 시 확정되는 불변 FPlayerInfo와
-// 불변 약한 세션 참조(WKPTR<Core::USession>)를 보관해 잠금 없이 안전하게 조회할 수 있다.
+// 플레이어가 조종하는 사물이다.
+// 세션은 UPawn 컴포넌트(USession)로 부착되며, 로그인 이후 수신 패킷 가공과 연결 종료 후처리를 직접 담당한다.
 class UPlayer final : public Core::UCharacter {
 public:
-	explicit UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info, Core::WKPTR<Core::USession> session);
+	explicit UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info);
 	virtual ~UPlayer() override;
 	NO_COPY(UPlayer)
 
 	// 생성 시 확정된 불변 플레이어 정보 참조다. 반환한 참조는 이 UPlayer가 살아 있는 동안 유효하다.
 	const FPlayerInfo& GetInfo() const noexcept { return _Info; }
 
-	// 연결된 세션을 돌려준다. 생성 시 확정된 불변 WKPTR이라 잠금 없이 호출할 수 있다.
-	// 세션이 이미 종료·해제됐으면 빈 포인터다.
-	Core::SHPTR<Core::USession> GetSession() const noexcept override;
+	// 부착된 USession의 strand에서 방 입장이 확정됐을 때 소속 방을 약참조로 연결한다.
+	void SetGameRoom(const Core::SHPTR<UGameRoom>& gameRoom) noexcept;
+
+	// 부착된 USession의 strand에서 완성된 패킷 뷰를 받아 도메인 로직으로 가공·전달한다.
+	void OnReceivePacket(const Core::FPacketView& packet) override;
+
+	// 부착된 USession의 strand에서 연결이 닫힐 때 정확히 한 번 호출된다. 소속 방 퇴장을 요청한다.
+	void OnSessionDisconnected() override;
 
 private:
+	// 모든 패킷이 함께 쓰는 수신 해석 함수다. 실패 시 RejectPacket으로 연결을 닫는다.
+	template<class TPacket>
+	void HandlePacket(const Core::FPacketView& packet);
+
+	// 부착된 세션으로 서버→클라이언트 패킷을 직렬화·전송한다.
+	template<class TPacket>
+	void SendPacket(Core::uint16 packetType, const TPacket& packet);
+
+	// 부착된 USession의 strand에서 실행되는 패킷별 처리 함수다.
+	void OnPacket(const multiplayer::protocol::CSLogin& packet);
+	void OnPacket(const multiplayer::protocol::CSChat& packet);
+	void OnPacket(const multiplayer::protocol::CSRoomUsers& packet);
+
+	// 프로토콜을 위반한 연결을 Warning으로 기록하고 부착된 세션을 닫는다.
+	void RejectPacket(Core::uint16 packetType, Core::STRINGVIEW reason);
+
 	FPlayerInfo _Info;
-	Core::WKPTR<Core::USession> _Session;
+	Core::WKPTR<UGameRoom> _GameRoom; // 부착된 USession의 strand에서만 접근한다.
 };
 
 SPACE_T

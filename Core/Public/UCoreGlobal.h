@@ -3,6 +3,7 @@
 
 SPACE_H(Core)
 
+// 프로세스 전역 싱글턴: 메모리 풀 관리자와 런타임 메트릭스 관리자를 보관한다.
 class CORE_DLL UCoreGlobal final {
 	DECLARE_INSTANCE(UCoreGlobal)
 public:

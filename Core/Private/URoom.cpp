@@ -25,6 +25,7 @@ URoom::~URoom()
     RUNTIME_TRACE_EVENT(Destroy, URoom, ~URoom, GetRuntimeTraceID());
 }
 
+// 액터 입장을 방 strand에 게시하고 결과를 onComplete로 알린다.
 bool URoom::RequestEnter(const SHPTR<UActor>& actor, FUNC<void(bool)> onComplete)
 {
     RUNTIME_TRACE_SCOPE(URoom, RequestEnter, GetRuntimeTraceID());
@@ -42,6 +43,7 @@ bool URoom::RequestEnter(const SHPTR<UActor>& actor, FUNC<void(bool)> onComplete
     return true;
 }
 
+// 액터 퇴장을 방 strand에 게시한다.
 void URoom::RequestLeave(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, RequestLeave, GetRuntimeTraceID());
@@ -55,6 +57,7 @@ void URoom::RequestLeave(const SHPTR<UActor>& actor)
     });
 }
 
+// 송신 프레임을 1회만 조립해 방 strand에서 전체 액터에게 공유 전송한다.
 void URoom::RequestBroadcast(const void* data, uint64 packetSize, uint16 packetType)
 {
     RUNTIME_TRACE_SCOPE(URoom, RequestBroadcast, GetRuntimeTraceID());
@@ -69,6 +72,7 @@ void URoom::RequestBroadcast(const void* data, uint64 packetSize, uint16 packetT
     });
 }
 
+// 임의 작업을 이 방의 strand로 직렬화 게시한다(실행 중 방 수명 유지).
 bool URoom::PostToRoom(FUNC<void()> task)
 {
     RUNTIME_TRACE_SCOPE(URoom, PostToRoom, GetRuntimeTraceID());
@@ -84,6 +88,7 @@ bool URoom::PostToRoom(FUNC<void()> task)
     return true;
 }
 
+// 방 strand 안에서 중복·정원·도메인 조건을 검사한 뒤 액터를 O(1) 등록한다.
 bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, TryEnterOnStrand, GetRuntimeTraceID());
@@ -106,6 +111,7 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
     return true;
 }
 
+// 방 strand 안에서 swap-and-pop으로 액터를 O(1) 제거하고 퇴장 훅을 호출한다.
 bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, LeaveOnStrand, GetRuntimeTraceID());
@@ -132,6 +138,7 @@ bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
     return true;
 }
 
+// 방 strand 안에서 해당 액터가 현재 소속돼 있는지 O(1) 확인한다.
 bool URoom::HasActor(const UActor* actor) const noexcept
 {
     if (actor == nullptr)
@@ -139,6 +146,7 @@ bool URoom::HasActor(const UActor* actor) const noexcept
     return _ActorIndexMap.contains(actor);
 }
 
+// 원시 본문을 1회 프레임화해 방 전체 액터에게 전송한다.
 void URoom::BroadcastOnStrand(const void* data, uint64 packetSize, uint16 packetType) const
 {
     RUNTIME_TRACE_SCOPE(URoom, BroadcastOnStrand, GetRuntimeTraceID());
@@ -149,6 +157,7 @@ void URoom::BroadcastOnStrand(const void* data, uint64 packetSize, uint16 packet
     BroadcastSharedOnStrand(framedBuffer);
 }
 
+// 미리 조립된 불변 프레임을 excludedActor를 제외한 방 내 모든 세션에 추가 복사 없이 송신한다.
 void URoom::BroadcastSharedOnStrand(const SHPTR<const BUFFER>& framedBuffer, const UActor* excludedActor) const
 {
     RUNTIME_TRACE_SCOPE(URoom, BroadcastSharedOnStrand, GetRuntimeTraceID());

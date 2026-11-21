@@ -21,6 +21,7 @@ UServerListener::~UServerListener()
 	RUNTIME_TRACE_EVENT(Destroy, UServerListener, ~UServerListener, GetRuntimeTraceID());
 }
 
+// 새 TCP 연결을 UServerSession으로 감싸 네트워크 관리자에 등록한 뒤 수신을 시작한다.
 void UServerListener::HandleAcceptedSocket(Core::TCPSOCKET socket)
 {
 	RUNTIME_TRACE_SCOPE(UServerListener, HandleAcceptedSocket, GetRuntimeTraceID());

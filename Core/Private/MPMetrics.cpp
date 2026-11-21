@@ -14,6 +14,7 @@ std::string_view UMPRuntimeMetrics::GetName() const
 	return "MemoryPool";
 }
 
+// 메모리 풀 누적 카운터를 모두 0으로 초기화한다.
 void UMPRuntimeMetrics::Reset()
 {
 	for(auto& metricIndex : _MpMetricsIndexArray)
@@ -22,6 +23,7 @@ void UMPRuntimeMetrics::Reset()
 	}
 }
 
+// 지정된 메모리 풀 이벤트 카운터를 원자적으로 1 증가시킨다.
 void UMPRuntimeMetrics::RecordMPMetrics(EMemoryPoolMetricIndex eMemoryPoolMetricIndex)
 {
 	// 색인 타입이 부호 없는 열거형이므로 상한만 확인한다.
@@ -31,6 +33,7 @@ void UMPRuntimeMetrics::RecordMPMetrics(EMemoryPoolMetricIndex eMemoryPoolMetric
 	}
 }
 
+// 현재 메모리 풀 지표 카운터를 스냅샷 구조체로 읽어 돌려준다.
 FMPRuntimeMetricsSnapshot UMPRuntimeMetrics::ReadSnapshot() const
 {
 	return FMPRuntimeMetricsSnapshot{

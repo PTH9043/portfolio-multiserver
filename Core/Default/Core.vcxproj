@@ -38,6 +38,7 @@
     <ClInclude Include="..\Public\ULogger.h" />
     <ClInclude Include="..\Public\FWorkerLogChannel.h" />
     <ClInclude Include="..\Public\UObject.h" />
+    <ClInclude Include="..\Public\UComponent.h" />
     <ClInclude Include="..\Public\UThreadManager.h" />
     <ClInclude Include="..\Public\UNetworkManager.h" />
     <ClInclude Include="..\Public\URoomManager.h" />
@@ -63,6 +64,7 @@
     <ClCompile Include="..\Private\ULogger.cpp" />
     <ClCompile Include="..\Private\FWorkerLogChannel.cpp" />
     <ClCompile Include="..\Private\UObject.cpp" />
+    <ClCompile Include="..\Private\UComponent.cpp" />
     <ClCompile Include="..\Private\UThreadManager.cpp" />
     <ClCompile Include="..\Private\UNetworkManager.cpp" />
     <ClCompile Include="..\Private\URoomManager.cpp" />

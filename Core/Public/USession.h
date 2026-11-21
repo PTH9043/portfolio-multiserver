@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreDefine.h"
-#include "UObject.h"
+#include "UComponent.h"
 #include "IHashable.h"
 #include "Packet.h"
 #include <boost/asio/strand.hpp>
@@ -12,12 +12,16 @@ SPACE_H(Core)
 STATIC_CONSTEXPR uint64 SESSION_MAX_SEND_QUEUE_BYTES{ 1024ull * 1024ull };
 STATIC_CONSTEXPR uint64 SESSION_MAX_WRITE_BATCH_COUNT{ 64 };
 
-class CORE_DLL USession abstract : public UObject, public IHashable<USession> {
+class CORE_DLL USession abstract : public UComponent, public IHashable<USession> {
 protected:
     explicit USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket);
     virtual ~USession() override;
 
 public:
+    STATIC_CONSTEXPR uint32 ComponentTypeID{ static_cast<uint32>(EComponentType::Session) };
+
+    // 세션 컴포넌트의 고정 유형 ID를 돌려준다.
+    uint32 GetComponentTypeID() const noexcept final override { return ComponentTypeID; }
     // 헤더와 본문을 하나의 불변 송신 프레임으로 조립한다. 방 브로드캐스트처럼 같은 패킷을 여러 세션에 보낼 때
     // 한 번만 생성해 SendShared로 공유하면 수신자 수만큼의 메모리 할당과 복사를 없앨 수 있다.
     // packetSize가 PACKET_MAX_BODY_SIZE를 넘거나 본문이 있는데 data가 비어 있으면 빈 포인터를 돌려준다.
@@ -70,15 +74,22 @@ protected:
     // Session이 shared_ptr 소유가 아니거나 task가 비어 있으면 false다. 게시 예외는 호출자에게 전달한다.
     bool PostToSession(FUNC<void()> task);
 
-    // packetData는 헤더를 포함한 패킷 하나이고, packetSize는 헤더를 포함한 전체 크기다.
-    // packetData는 수신 버퍼를 가리키므로 이 함수가 반환할 때까지만 사용한다.
+    // 완성된 패킷 뷰를 소유자 UPawn에 전달한다.
+    // 부착된 소유자(UPawn)가 있으면 owner->OnReceivePacket으로 넘기고,
+    // 아직 소유자가 부착되지 않은 연결(예: 로그인 전 핸드셰이크)이면 OnUnboundPacket으로 넘긴다.
+    // packet은 수신 버퍼를 가리키는 NO_COPY 동기 뷰이며, 타 스레드로 넘길 때는 packet.Detach()로 불변 복사한다.
     // 이 Session의 strand에서 호출된다.
     // 예외를 던지면 이 Session만 닫고 Logger에 Error로 기록한다. 서버와 다른 Session은 계속 동작한다.
     // 같은 수신에 남은 패킷은 처리하지 않는다.
-    virtual void ProcessingData(uint8* packetData, uint64 packetSize) = 0;
+    void ProcessingData(const FPacketView& packet);
+
+    // 소유자 UPawn이 아직 부착되지 않은 상태에서 패킷을 받았을 때 이 Session의 strand에서 호출된다.
+    // 파생 세션이 로그인 전 핸드셰이크·미인증 거절을 처리할 때 구현한다.
+    // packet은 동기 스코프 전용이며, 타 스레드로 넘길 때는 packet.Detach()를 사용한다.
+    virtual void OnUnboundPacket(const FPacketView& packet) = 0;
 
     // 이 Session의 strand에서 연결이 닫힐 때 정확히 한 번 호출된다.
-    // 파생 클래스가 소유한 게임 객체(예: UPlayer) 정리와 방 퇴장 후처리를 맡는다.
+    // 파생 세션의 내부 상태 정리 후 소유자 UPawn::OnSessionDisconnected가 이어서 호출된다.
     virtual void OnDisconnected();
 
 

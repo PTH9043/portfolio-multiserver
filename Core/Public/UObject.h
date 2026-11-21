@@ -4,6 +4,7 @@
 SPACE_H(Core)
 class UCoreInstance;
 
+// UCoreInstance를 약참조(WKPTR)로 보관하는 Core 도메인 객체의 기반 클래스다.
 class CORE_DLL UObject abstract : public UCoreBase {
 protected:
 	UObject(SHPTR<UCoreInstance> coreInstance);

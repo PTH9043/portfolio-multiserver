@@ -83,10 +83,13 @@
       <Filter>03.GameObj\Actor</Filter>
     </ClInclude>
     <ClInclude Include="..\Public\UPawn.h">
-      <Filter>03.GameObj\Pawn</Filter>
+      <Filter>03.GameObj\Actor\Pawn</Filter>
     </ClInclude>
     <ClInclude Include="..\Public\UCharacter.h">
-      <Filter>03.GameObj\Character</Filter>
+      <Filter>03.GameObj\Actor\Pawn\Character</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Public\UComponent.h">
+      <Filter>04.Comp</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -171,11 +174,14 @@
     <Filter Include="03.GameObj\Actor">
       <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d02}</UniqueIdentifier>
     </Filter>
-    <Filter Include="03.GameObj\Pawn">
+    <Filter Include="03.GameObj\Actor\Pawn">
       <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d03}</UniqueIdentifier>
     </Filter>
-    <Filter Include="03.GameObj\Character">
+    <Filter Include="03.GameObj\Actor\Pawn\Character">
       <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d04}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="04.Comp">
+      <UniqueIdentifier>{12d61dcc-00aa-4993-a2fd-766a44bceff1}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -243,10 +249,13 @@
       <Filter>03.GameObj\Actor</Filter>
     </ClCompile>
     <ClCompile Include="..\Private\UPawn.cpp">
-      <Filter>03.GameObj\Pawn</Filter>
+      <Filter>03.GameObj\Actor\Pawn</Filter>
     </ClCompile>
     <ClCompile Include="..\Private\UCharacter.cpp">
-      <Filter>03.GameObj\Character</Filter>
+      <Filter>03.GameObj\Actor\Pawn\Character</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Private\UComponent.cpp">
+      <Filter>04.Comp</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

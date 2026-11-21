@@ -20,6 +20,7 @@ UActor::~UActor()
 	RUNTIME_TRACE_EVENT(Destroy, UActor, ~UActor, GetRuntimeTraceID());
 }
 
+// 기본 액터는 네트워크 세션을 가지지 않으며, UPawn에서 세션 컴포넌트 조회로 재정의한다.
 SHPTR<USession> UActor::GetSession() const noexcept
 {
 	return nullptr;

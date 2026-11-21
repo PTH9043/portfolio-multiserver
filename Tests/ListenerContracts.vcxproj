@@ -10,6 +10,10 @@
 <ClCompile Include="..\Core\Private\UNetworkManager.cpp" />
 <ClCompile Include="..\Core\Private\URoomManager.cpp" />
 <ClCompile Include="..\Core\Private\UObject.cpp" />
+<ClCompile Include="..\Core\Private\UComponent.cpp" />
+<ClCompile Include="..\Core\Private\UActor.cpp" />
+<ClCompile Include="..\Core\Private\UPawn.cpp" />
+<ClCompile Include="..\Core\Private\Packet.cpp" />
 <ClCompile Include="..\Core\Private\UListener.cpp" />
 <ClCompile Include="..\Core\Private\USession.cpp" />
 <ClCompile Include="..\Core\Private\URoom.cpp" />

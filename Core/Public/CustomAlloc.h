@@ -8,12 +8,14 @@ SPACE_H(Core)
 
 SPACE_H(Alloc)
 
+// 전역 메모리 풀(GMemory)을 호출하는 저수준 할당·해제 진입점이다.
 class CORE_DLL UAllocator {
 public:
 	static void* Alloc(uint64 size);
 	static void Release(void* ptr);
 };
 
+// STL 컨테이너와 allocate_shared가 전역 메모리 풀을 쓰도록 연결하는 커스텀 할당기다.
 template<class T>
 class USTLAllocator {
 public:
@@ -49,6 +51,7 @@ public:
 SPACE_T
 
 
+// 전역 메모리 풀을 사용해 객체와 제어 블록을 한 번에 생성하는 shared_ptr 팩토리다.
 template<class T, class... Args>
 SHPTR<T> MakeShared(Args&&... args)
 {

@@ -24,6 +24,7 @@ URuntimeMetricsManager::URuntimeMetricsManager()
 URuntimeMetricsManager::~URuntimeMetricsManager()
 {}
 
+// 등록된 모든 런타임 메트릭스 카운터를 잠금 하에 초기화한다.
 void URuntimeMetricsManager::ResetAll()
 {
 	EXCLUSIVE_LOCK_GUARD lock{ _MetricsLock };
@@ -33,6 +34,7 @@ void URuntimeMetricsManager::ResetAll()
 	}
 }
 
+// 등록된 메트릭스 수집기 개수를 돌려준다.
 uint64 URuntimeMetricsManager::GetRegisteredCount() const
 {
 	// 측정 객체는 생성자에서만 등록된다.
@@ -40,13 +42,14 @@ uint64 URuntimeMetricsManager::GetRegisteredCount() const
 }
 
 #if defined(ENABLE_MP_RUNTIME_METRICS)
-/* MpRunTimeMetrics의 함수 */
+// 메모리 풀 메트릭스 이벤트를 기록한다.
 void URuntimeMetricsManager::RecordMPMetrics(EMemoryPoolMetricIndex eMemoryPoolMetricIndex)
 {
 	RETURN_INVALID_COND(_MpRuntimeMetrics == nullptr, );
 	_MpRuntimeMetrics->RecordMPMetrics(eMemoryPoolMetricIndex);
 }
 
+// 현재 메모리 풀 메트릭스 스냅샷을 조회한다.
 FMPRuntimeMetricsSnapshot URuntimeMetricsManager::ReadSnapshot() const
 {	
 	RETURN_INVALID_COND(_MpRuntimeMetrics == nullptr, {});
