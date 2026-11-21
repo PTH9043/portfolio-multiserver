@@ -1,658 +1,462 @@
 #include "CoreDefine.h"
+#include "Packet.h"
+#include "UComponent.h"
 #include "UCoreInstance.h"
 #include "UListener.h"
+#include "ULogger.h"
+#include "UNetworkManager.h"
+#include "UPawn.h"
+#include "URoom.h"
+#include "URoomManager.h"
 #include "USession.h"
+
+#include <boost/asio/connect.hpp>
 #include <boost/asio/read.hpp>
 #include <boost/asio/write.hpp>
-#include <algorithm>
-#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <iostream>
-#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
-#include <vector>
+#include <type_traits>
+#include <utility>
 
 using namespace Core;
 using namespace std::chrono_literals;
+
 static_assert(PACKET_BUFFER_SIZE == 1024, "session packet buffer must be 1024 bytes");
+static_assert(!std::is_copy_constructible_v<FPacketView>, "FPacketView must not be copy constructible");
+static_assert(!std::is_copy_assignable_v<FPacketView>, "FPacketView must not be copy assignable");
+static_assert(!std::is_move_constructible_v<FPacketView>, "FPacketView must not be move constructible");
+static_assert(!std::is_move_assignable_v<FPacketView>, "FPacketView must not be move assignable");
+static_assert(std::is_copy_constructible_v<FPacketPayload>, "FPacketPayload must be copy constructible");
+static_assert(std::is_move_constructible_v<FPacketPayload>, "FPacketPayload must be move constructible");
 
-static void Require(bool value, const char* message) {
-    if (!value) throw std::runtime_error(message);
+namespace {
+void Require(const bool condition, const char* message)
+{
+	if (!condition)
+		throw std::runtime_error(message);
 }
 
-struct FTestState {
-    SHARED_MUTEX Mutex;
-    COND_VARIABLE Changed;
-    std::vector<std::pair<uint16, std::vector<uint8>>> Packets;
-    std::vector<ESessionSendAdmission> Admissions;
-    std::vector<std::pair<BOOST_ERROR_CODE, uint64>> Completions;
-    BOOST_ERROR_CODE CloseReason;
-    int Closed{0};
-    int Exceptions{0};
-    bool ThrowPacket{false};
-    bool ThrowClose{false};
-};
+// 4바이트 리틀 엔디안 헤더와 본문을 하나의 TCP 프레임 바이트 배열로 조립한다.
+BUFFER BuildWireFrame(const uint16 type, const uint16 declaredSize, const uint8* body, const uint64 bodyBytes)
+{
+	FPacketHeader header{};
+	header.type = type;
+	header.size = declaredSize;
 
-class UTestSession final : public USession {
+	BUFFER out(PACKET_HEADER_SIZE + bodyBytes);
+	std::memcpy(out.data(), &header, PACKET_HEADER_SIZE);
+	if (bodyBytes != 0 && body != nullptr)
+		std::memcpy(out.data() + PACKET_HEADER_SIZE, body, bodyBytes);
+	return out;
+}
+
+// ---- Group 2/4 테스트용 파생 타입 (TypeID + static_cast 계약 검증) ----
+
+class UTestCustomComponent final : public UComponent {
 public:
-    UTestSession(SHPTR<UCoreInstance> core, TCPSOCKET socket, FTestState& state)
-        : USession{std::move(core), std::move(socket),
-            [&state](const BOOST_ERROR_CODE& ec) {
-                bool shouldThrow;
-                { EXCLUSIVE_LOCK_GUARD lock(state.Mutex); state.CloseReason = ec; ++state.Closed; shouldThrow = state.ThrowClose; }
-                state.Changed.notify_all();
-                if (shouldThrow) throw std::runtime_error("close callback failure");
-            },
-            [&state](EXPECTION_PTR error) {
-                { EXCLUSIVE_LOCK_GUARD lock(state.Mutex); if (error) ++state.Exceptions; }
-                state.Changed.notify_all();
-            }}, _Test{state} {}
-protected:
-    void HandlePacket(const FPacketHeader& header, const uint8* body, uint64 size) override {
-        EXCLUSIVE_LOCK_GUARD lock(_Test.Mutex);
-        if (_Test.ThrowPacket) throw std::runtime_error("packet handler failure");
-        _Test.Packets.emplace_back(header.type, std::vector<uint8>(body, body + size));
-        _Test.Changed.notify_all();
-    }
-private:
-    FTestState& _Test;
+	STATIC_CONSTEXPR uint32 ComponentTypeID{ static_cast<uint32>(EComponentType::UserStart) };
+	explicit UTestCustomComponent(SHPTR<UCoreInstance> coreInstance)
+		: UComponent{ std::move(coreInstance) } {}
+	uint32 GetComponentTypeID() const noexcept override { return ComponentTypeID; }
 };
 
-struct Fixture {
-    FTestState State;
-    IOCONTEXT ServerContext;
-    ASIO::executor_work_guard<IOCONTEXT::executor_type> Guard{ASIO::make_work_guard(ServerContext)};
-    IOCONTEXT ClientContext;
-    TCPSOCKET Client{ClientContext};
-    SHPTR<UCoreInstance> CoreInstance{MakeShared<UCoreInstance>()};
-    SHPTR<UTestSession> Session;
-    std::vector<std::thread> Workers;
-
-    explicit Fixture(bool smallBuffers = false) {
-        TCPACCEPTOR acceptor{ServerContext, TCP_ENDPOINT{ASIO::ip::address_v4::loopback(), 0}};
-        if (smallBuffers) {
-            Client.open(ASIO::ip::tcp::v4());
-            Client.set_option(ASIO::socket_base::receive_buffer_size(4096));
-        }
-        Client.connect(acceptor.local_endpoint());
-        TCPSOCKET socket{ServerContext};
-        acceptor.accept(socket);
-        if (smallBuffers) socket.set_option(ASIO::socket_base::send_buffer_size(4096));
-        Session = MakeShared<UTestSession>(CoreInstance, std::move(socket), State);
-    }
-    void Start() {
-        Require(Session->Start(), "post session start");
-        for (int i = 0; i < 2; ++i) Workers.emplace_back([this] {
-            try { ServerContext.run(); }
-            catch (...) {
-                { EXCLUSIVE_LOCK_GUARD lock(State.Mutex); ++State.Exceptions; }
-                State.Changed.notify_all();
-            }
-            GThreadMemoryCache.FlushToCentral();
-        });
-    }
-    template<class P> void Wait(P pred, const char* message) {
-        std::unique_lock<SHARED_MUTEX> lock(State.Mutex);
-        Require(State.Changed.wait_for(lock, 5s, pred), message);
-    }
-    void WaitClosed() { Wait([this] { return State.Closed != 0; }, "session close timeout"); }
-    bool Send(uint16 type, BUFFER body) {
-        return Session->RequestSend(type, std::move(body),
-            [this](ESessionSendAdmission value) {
-                { EXCLUSIVE_LOCK_GUARD lock(State.Mutex); State.Admissions.push_back(value); }
-                State.Changed.notify_all();
-            },
-            [this](const BOOST_ERROR_CODE& ec, uint64 bytes) {
-                { EXCLUSIVE_LOCK_GUARD lock(State.Mutex); State.Completions.emplace_back(ec, bytes); }
-                State.Changed.notify_all();
-            });
-    }
-    ~Fixture() {
-        if (Session) Session->RequestStop();
-        Guard.reset();
-        ServerContext.stop();
-        for (auto& worker : Workers) if (worker.joinable()) worker.join();
-        Session.reset();
-    }
-};
-
-static std::vector<uint8> Frame(uint16 type, const std::vector<uint8>& body) {
-    FPacketHeader header{type, static_cast<uint16>(body.size())};
-    std::vector<uint8> data(sizeof(header) + body.size());
-    std::memcpy(data.data(), &header, sizeof(header));
-    if (!body.empty()) std::memcpy(data.data() + sizeof(header), body.data(), body.size());
-    return data;
-}
-
-static void Write(TCPSOCKET& socket, const std::vector<uint8>& bytes) {
-    ASIO::write(socket, ASIO::buffer(bytes));
-}
-
-static std::vector<uint8> ReadExact(TCPSOCKET& socket, size_t size) {
-    socket.non_blocking(true);
-    std::vector<uint8> result(size);
-    size_t received = 0;
-    const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (received < size && std::chrono::steady_clock::now() < deadline) {
-        BOOST_ERROR_CODE ec;
-        received += socket.read_some(ASIO::buffer(result.data() + received, size - received), ec);
-        if (ec == ASIO::error::would_block || ec == ASIO::error::try_again) {
-            std::this_thread::sleep_for(1ms); continue;
-        }
-        if (ec) throw std::runtime_error("client read failed after " + std::to_string(received) + " bytes: " + std::to_string(ec.value()));
-    }
-    Require(received == size, "client read timeout");
-    return result;
-}
-
-static void TestReceive() {
-    Fixture f; f.Start();
-    auto a = Frame(1, {1,2,3,4,5,6,7,8});
-    auto b = Frame(2, {9,10,11,12,13,14,15,16});
-    Write(f.Client, {a.begin(), a.begin() + 8});
-    std::vector<uint8> middle(a.begin() + 8, a.end());
-    middle.insert(middle.end(), b.begin(), b.begin() + 4);
-    Write(f.Client, middle);
-    f.Wait([&] { return f.State.Packets.size() == 1; }, "first fragmented frame");
-    Write(f.Client, {b.begin() + 4, b.end()});
-    auto empty = Frame(99, {}), c = Frame(3, {42});
-    empty.insert(empty.end(), c.begin(), c.end()); Write(f.Client, empty);
-    auto maximum = Frame(4, std::vector<uint8>(1020, 77)); Write(f.Client, maximum);
-    f.Wait([&] { return f.State.Packets.size() == 4; }, "all valid frames");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Packets[0].second == std::vector<uint8>({1,2,3,4,5,6,7,8}), "A body");
-        Require(f.State.Packets[1].second == std::vector<uint8>({9,10,11,12,13,14,15,16}), "B body after compaction");
-        Require(f.State.Packets[2].first == 3 && f.State.Packets[3].second == std::vector<uint8>(1020, 77), "empty skip and max frame body");
-    }
-    FPacketHeader invalid{5, 1021};
-    std::vector<uint8> bad(sizeof(invalid)); std::memcpy(bad.data(), &invalid, sizeof(invalid));
-    auto after = Frame(6, {8}); bad.insert(bad.end(), after.begin(), after.end());
-    Write(f.Client, bad); f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(f.State.CloseReason == ASIO::error::message_size, "invalid length close reason");
-    Require(f.State.Packets.size() == 4 && f.State.Closed == 1, "invalid frame stops parsing and closes once");
-}
-
-static void TestFragmentedStream() {
-    std::vector<std::pair<uint16, std::vector<uint8>>> expected;
-    std::vector<uint8> stream;
-    for (uint16 i = 0; i < 160; ++i) {
-        const size_t length = i % 7 == 0 ? 1020 : (i * 37) % 181;
-        std::vector<uint8> body(length);
-        for (size_t j = 0; j < length; ++j) body[j] = static_cast<uint8>((i + j * 31) & 255);
-        auto bytes = Frame(i, body);
-        stream.insert(stream.end(), bytes.begin(), bytes.end());
-        if (!body.empty()) expected.emplace_back(i, std::move(body));
-    }
-    Fixture f; f.Start();
-    uint32 sequence = 17;
-    size_t offset = 0;
-    while (offset < stream.size()) {
-        sequence = sequence * 1664525u + 1013904223u;
-        const size_t chunk = (std::min)(size_t(1 + sequence % 137), stream.size() - offset);
-        ASIO::write(f.Client, ASIO::buffer(stream.data() + offset, chunk));
-        offset += chunk;
-    }
-    BOOST_ERROR_CODE error; f.Client.shutdown(TCPSOCKET::shutdown_send, error);
-    Require(!error, "fragmented stream EOF");
-    f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(!f.State.CloseReason && f.State.Packets == expected, "fragmented stream content and order");
-}
-
-static void TestGracefulSend() {
-    Fixture f; f.Start();
-    BUFFER first{0,255}, second{3}, rejected{4};
-    Require(f.Send(11, first) && f.Send(12, second) && f.Send(14, BUFFER(1020, 8)) && f.Send(15, BUFFER{}), "post sends including maximum and empty frames");
-    first[0] = 99;
-    Require(f.Session->RequestStop(), "post normal stop");
-    Require(f.Send(13, rejected), "post send after stop");
-    f.Wait([&] { return f.State.Closed && f.State.Admissions.size() == 5 && f.State.Completions.size() == 4; }, "graceful callbacks");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        if (f.State.Completions[0].first || f.State.Completions[1].first || f.State.Completions[2].first || f.State.Completions[3].first || f.State.CloseReason)
-            throw std::runtime_error("send errors: " + std::to_string(f.State.Completions[0].first.value()) + "," +
-                std::to_string(f.State.Completions[1].first.value()) + ", close " + std::to_string(f.State.CloseReason.value()));
-    }
-    auto expected = Frame(11, {0,255}), next = Frame(12, {3});
-    expected.insert(expected.end(), next.begin(), next.end());
-    auto maximum = Frame(14, std::vector<uint8>(1020, 8));
-    expected.insert(expected.end(), maximum.begin(), maximum.end());
-    auto empty = Frame(15, {});
-    expected.insert(expected.end(), empty.begin(), empty.end());
-    Require(ReadExact(f.Client, expected.size()) == expected, "FIFO and owned send buffers");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(f.State.Admissions[0] == ESessionSendAdmission::Accepted && f.State.Admissions[1] == ESessionSendAdmission::Accepted && f.State.Admissions[2] == ESessionSendAdmission::Accepted && f.State.Admissions[3] == ESessionSendAdmission::Accepted && f.State.Admissions[4] == ESessionSendAdmission::Closing, "send admissions");
-    Require(!f.State.Completions[0].first && f.State.Completions[0].second == 6 && !f.State.Completions[1].first && f.State.Completions[1].second == 5 && !f.State.Completions[2].first && f.State.Completions[2].second == 1024 && !f.State.Completions[3].first && f.State.Completions[3].second == 4, "send completion bytes");
-    Require(!f.State.CloseReason && f.State.Closed == 1, "normal close once");
-}
-
-static void TestRepeatedStartAndCallbackStop() {
-    bool stopPosted = false;
-    Fixture f;
-    Require(f.Session->Start() && f.Session->Start(), "post repeated starts");
-    f.Start();
-    Write(f.Client, Frame(25, {1,2,3}));
-    f.Wait([&] { return f.State.Packets.size() == 1; }, "receive after repeated starts");
-
-    Require(f.Session->RequestSend(26, BUFFER{4,5},
-        [&f, &stopPosted](ESessionSendAdmission value) {
-            const bool posted = f.Session->RequestStop();
-            { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); stopPosted = posted; f.State.Admissions.push_back(value); }
-            f.State.Changed.notify_all();
-        },
-        [&f](const BOOST_ERROR_CODE& error, uint64 bytes) {
-            { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); f.State.Completions.emplace_back(error, bytes); }
-            f.State.Changed.notify_all();
-        }), "post send with stop requested by admission callback");
-    f.WaitClosed();
-    Require(ReadExact(f.Client, 6) == Frame(26, {4,5}), "callback stop drains accepted frame");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(stopPosted && f.State.Admissions.size() == 1 &&
-        f.State.Admissions[0] == ESessionSendAdmission::Accepted, "callback stop posted after admission");
-    Require(f.State.Packets.size() == 1 && f.State.Packets[0].second == std::vector<uint8>({1,2,3}),
-        "repeated start processes one packet once");
-    Require(f.State.Completions.size() == 1 && !f.State.Completions[0].first &&
-        f.State.Completions[0].second == 6 && f.State.Closed == 1 && !f.State.CloseReason,
-        "callback stop completes send before close");
-}
-
-static void TestCompletionCallbackRequestsStop() {
-    bool stopPosted = false, latePosted = false;
-    int lateCompletions = 0;
-    Fixture f; f.Start();
-    Require(f.Session->RequestSend(27, BUFFER{7},
-        [&f](ESessionSendAdmission value) {
-            { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); f.State.Admissions.push_back(value); }
-            f.State.Changed.notify_all();
-        },
-        [&f, &stopPosted, &latePosted, &lateCompletions](const BOOST_ERROR_CODE& error, uint64 bytes) {
-            const bool stopped = f.Session->RequestStop();
-            const bool posted = f.Session->RequestSend(28, BUFFER{8},
-                [&f](ESessionSendAdmission value) {
-                    { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); f.State.Admissions.push_back(value); }
-                    f.State.Changed.notify_all();
-                },
-                [&f, &lateCompletions](const BOOST_ERROR_CODE&, uint64) {
-                    { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++lateCompletions; }
-                    f.State.Changed.notify_all();
-                });
-            { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); stopPosted = stopped; latePosted = posted; f.State.Completions.emplace_back(error, bytes); }
-            f.State.Changed.notify_all();
-        }), "post send whose completion requests stop");
-    f.Wait([&] { return f.State.Closed == 1 && f.State.Admissions.size() == 2; },
-        "completion callback stop and late admission");
-    Require(ReadExact(f.Client, 5) == Frame(27, {7}), "completion callback sends first frame");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(stopPosted && latePosted && f.State.Admissions[0] == ESessionSendAdmission::Accepted &&
-        f.State.Admissions[1] == ESessionSendAdmission::Closing, "completion callback post order");
-    Require(f.State.Completions.size() == 1 && !f.State.Completions[0].first &&
-        f.State.Completions[0].second == 5 && lateCompletions == 0 && !f.State.CloseReason,
-        "completion callback closes once without completing rejected send");
-}
-
-static void TestStopBeforeStart() {
-    Fixture f;
-    Require(f.Session->RequestStop(), "post stop before start");
-    Require(f.Send(29, BUFFER{9}), "post send after stop before start");
-    f.Start();
-    f.Wait([&] { return f.State.Closed == 1 && f.State.Admissions.size() == 1; },
-        "stop before start completion");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(!f.State.CloseReason && f.State.Admissions[0] == ESessionSendAdmission::Closing &&
-        f.State.Completions.empty() && f.State.Packets.empty() && f.State.Exceptions == 0,
-        "stop before start closes once and rejects sends");
-}
-
-static void TestEOFAndException() {
-    {
-        Fixture f; f.Start();
-        Require(f.Send(7, BUFFER{7,8}), "send before EOF");
-        f.Wait([&] { return !f.State.Admissions.empty(); }, "EOF send accepted");
-        BOOST_ERROR_CODE ec; f.Client.shutdown(TCPSOCKET::shutdown_send, ec); Require(!ec, "client half close");
-        f.WaitClosed();
-        Require(ReadExact(f.Client, 6) == Frame(7, {7,8}), "send after receive EOF");
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(!f.State.CloseReason && f.State.Completions.size() == 1 && !f.State.Completions[0].first, "EOF drains accepted send");
-    }
-    {
-        Fixture f; f.State.ThrowPacket = true; f.Start(); Write(f.Client, Frame(1, {1})); f.WaitClosed();
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Exceptions == 1 && f.State.CloseReason == ASIO::error::fault && f.State.Closed == 1, "packet exception reported and session closed");
-    }
-}
-
-static void TestEOFWithPartialPacket() {
-    Fixture f; f.Start();
-    auto bytes = Frame(20, {1,2,3});
-    auto incomplete = Frame(21, {4,5,6});
-    bytes.insert(bytes.end(), incomplete.begin(), incomplete.begin() + 5);
-    Write(f.Client, bytes);
-    BOOST_ERROR_CODE error;
-    f.Client.shutdown(TCPSOCKET::shutdown_send, error);
-    Require(!error, "client EOF after partial packet");
-    f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(!f.State.CloseReason && f.State.Closed == 1, "EOF closes normally");
-    Require(f.State.Packets.size() == 1 && f.State.Packets[0].first == 20 &&
-        f.State.Packets[0].second == std::vector<uint8>({1,2,3}), "EOF processes complete packet only");
-}
-
-static void TestReceiveReset() {
-    Fixture f; f.Start();
-    f.Client.set_option(ASIO::socket_base::linger(true, 0));
-    BOOST_ERROR_CODE error;
-    f.Client.close(error);
-    Require(!error, "client reset close");
-    f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(f.State.CloseReason == ASIO::error::connection_reset && f.State.Closed == 1,
-        "receive error preserves reset reason");
-}
-
-static void TestCallbackExceptions() {
-    Fixture f; f.Start();
-    Require(f.Session->RequestSend(30, BUFFER{9},
-        [](ESessionSendAdmission) { throw std::runtime_error("admission callback failure"); },
-        [](const BOOST_ERROR_CODE&, uint64) { throw std::runtime_error("completion callback failure"); }), "post callbacks that throw");
-    f.Wait([&] { return f.State.Exceptions == 2; }, "callback exception reporting");
-    { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); f.State.ThrowClose = true; }
-    Require(f.Session->RequestStop(), "close after callback exceptions");
-    f.Wait([&] { return f.State.Closed == 1 && f.State.Exceptions == 3; }, "close callback exception reporting");
-    Require(ReadExact(f.Client, 5) == Frame(30, {9}), "send continues after callback exception");
-}
-
-static void TestConcurrentAdmissions() {
-    Fixture f; f.Start();
-    std::vector<std::thread> senders;
-    for (int n = 0; n < 4; ++n) senders.emplace_back([&f] {
-        for (int i = 0; i < 30; ++i) Require(f.Send(8, BUFFER{8}), "concurrent post");
-        GThreadMemoryCache.FlushToCentral();
-    });
-    Require(f.Session->RequestStop(), "concurrent stop post");
-    for (auto& sender : senders) sender.join();
-    f.Wait([&] { return f.State.Admissions.size() == 120 && f.State.Closed; }, "concurrent admission results");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    size_t accepted = 0;
-    for (auto a : f.State.Admissions) {
-        Require(a == ESessionSendAdmission::Accepted || a == ESessionSendAdmission::Closing, "unexpected admission");
-        if (a == ESessionSendAdmission::Accepted) ++accepted;
-    }
-    Require(f.State.Completions.size() == accepted && f.State.Closed == 1, "accepted sends complete before close exactly once");
-}
-
-static void TestConcurrentRequestIdentity() {
-    struct FRequestResult {
-        int Admissions{0};
-        int Completions{0};
-        ESessionSendAdmission Status{ESessionSendAdmission::NotStarted};
-    };
-    std::vector<FRequestResult> requests(120);
-    std::atomic<int> failedPosts{0};
-    Fixture f; f.Start();
-    std::vector<std::thread> senders;
-    for (int n = 0; n < 4; ++n) senders.emplace_back([&f, &requests, &failedPosts, n] {
-        for (int i = 0; i < 30; ++i) {
-            const int index = n * 30 + i;
-            bool posted = f.Session->RequestSend(8, BUFFER{8},
-                [&f, &requests, index](ESessionSendAdmission value) {
-                    { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++requests[index].Admissions; requests[index].Status = value; f.State.Admissions.push_back(value); }
-                    f.State.Changed.notify_all();
-                },
-                [&f, &requests, index](const BOOST_ERROR_CODE& error, uint64 bytes) {
-                    { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++requests[index].Completions; f.State.Completions.emplace_back(error, bytes); }
-                    f.State.Changed.notify_all();
-                });
-            if (!posted) ++failedPosts;
-        }
-        GThreadMemoryCache.FlushToCentral();
-    });
-    Require(f.Session->RequestStop(), "post stop amid unique requests");
-    for (auto& sender : senders) sender.join();
-    Require(failedPosts == 0, "post unique requests");
-    f.Wait([&] { return f.State.Admissions.size() == 120 && f.State.Closed; }, "unique request results");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    for (const auto& request : requests) {
-        Require(request.Admissions == 1, "each request admission exactly once");
-        if (request.Status == ESessionSendAdmission::Accepted)
-            Require(request.Completions == 1, "accepted request completes exactly once");
-        else {
-            Require(request.Status == ESessionSendAdmission::Closing, "unexpected unique request status");
-            Require(request.Completions == 0, "rejected request has no completion");
-        }
-    }
-}
-
-static void TestAdmissionAndLifetime() {
-    Fixture f;
-    Require(f.Send(1, BUFFER(1021, 1)), "post oversized send before start");
-    f.Start();
-    Require(f.Send(2, BUFFER(1021, 1)), "post too large send");
-    f.Wait([&] { return f.State.Admissions.size() == 2; }, "initial admission responses");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Admissions[0] == ESessionSendAdmission::NotStarted &&
-            f.State.Admissions[1] == ESessionSendAdmission::InvalidSize, "invalid requests rejected");
-        Require(f.State.Completions.empty(), "rejected requests do not complete");
-    }
-    Require(f.Session->RequestStop(), "post stop with receive pending");
-    f.WaitClosed();
-    Require(f.Send(3, BUFFER(1021, 1)), "post oversized send after close notification");
-    f.Wait([&] { return f.State.Admissions.size() == 3; }, "post-close admission callback");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Admissions[2] == ESessionSendAdmission::Closing &&
-            f.State.Completions.empty() && f.State.Closed == 1, "post-close request rejected once");
-    }
-    WKPTR<UTestSession> weak = f.Session;
-    f.Session.reset();
-    const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (!weak.expired() && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(1ms);
-    Require(weak.expired(), "session released after pending handlers");
-}
-
-static void TestUnownedSessionPostFailure() {
-    FTestState state;
-    IOCONTEXT serverContext, clientContext;
-    TCPACCEPTOR acceptor{serverContext, TCP_ENDPOINT{ASIO::ip::address_v4::loopback(), 0}};
-    TCPSOCKET client{clientContext}; client.connect(acceptor.local_endpoint());
-    TCPSOCKET socket{serverContext}; acceptor.accept(socket);
-    auto core = MakeShared<UCoreInstance>();
-    UTestSession session{core, std::move(socket), state};
-    int callbacks = 0;
-    Require(!session.Start(), "unowned start fails without posting");
-    Require(!session.RequestSend(1, BUFFER{1}, [&callbacks](ESessionSendAdmission) { ++callbacks; },
-        [&callbacks](const BOOST_ERROR_CODE&, uint64) { ++callbacks; }), "unowned send fails without posting");
-    Require(!session.RequestStop(), "unowned stop fails without posting");
-    Require(callbacks == 0 && serverContext.poll() == 0, "failed posts do not invoke callbacks");
-}
-
-static void TestPendingReceiveLifetime() {
-    Fixture f;
-    Require(f.Session->Start(), "post start before workers");
-    Require(f.Session->RequestStop(), "post stop before workers");
-    WKPTR<UTestSession> weak = f.Session;
-    f.Session.reset();
-    Require(!weak.expired(), "posted work retains session");
-    for (int i = 0; i < 2; ++i) f.Workers.emplace_back([&f] {
-        f.ServerContext.run(); GThreadMemoryCache.FlushToCentral();
-    });
-    f.WaitClosed();
-    const auto deadline = std::chrono::steady_clock::now() + 5s;
-    while (!weak.expired() && std::chrono::steady_clock::now() < deadline)
-        std::this_thread::sleep_for(1ms);
-    Require(weak.expired(), "receive cancellation releases last reference");
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(f.State.Closed == 1 && !f.State.CloseReason, "pending receive ends before close notification");
-}
-
-static void TestInvalidPacketCancelsQueuedSends() {
-    std::vector<int> admissions(2048), completions(2048);
-    Fixture f(true); f.Start();
-    for (int i = 0; i < 2048; ++i) {
-        Require(f.Session->RequestSend(4, BUFFER(508, 5),
-            [&f, &admissions, i](ESessionSendAdmission value) {
-                { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++admissions[i]; f.State.Admissions.push_back(value); }
-                f.State.Changed.notify_all();
-            },
-            [&f, &completions, i](const BOOST_ERROR_CODE& error, uint64 bytes) {
-                { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++completions[i]; f.State.Completions.emplace_back(error, bytes); }
-                f.State.Changed.notify_all();
-            }), "post bulk send");
-    }
-    f.Wait([&] { return f.State.Admissions.size() == 2048; }, "bulk send admissions");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Completions.size() < 2048, "test requires pending sends");
-        for (auto value : f.State.Admissions) Require(value == ESessionSendAdmission::Accepted, "bulk admission");
-    }
-    FPacketHeader invalid{1, 1021};
-    std::vector<uint8> bytes(sizeof(invalid)); std::memcpy(bytes.data(), &invalid, sizeof(invalid));
-    Write(f.Client, bytes); f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(f.State.CloseReason == ASIO::error::message_size && f.State.Closed == 1, "invalid packet closes session");
-    Require(f.State.Completions.size() == 2048, "all admitted sends complete once");
-    size_t cancelled = 0;
-    for (const auto& result : f.State.Completions)
-        if (result.first == ASIO::error::operation_aborted) ++cancelled;
-    Require(cancelled != 0, "invalid packet cancels pending sends");
-    for (int i = 0; i < 2048; ++i)
-        Require(admissions[i] == 1 && completions[i] == 1, "each accepted send notified exactly once");
-}
-
-static void TestEOFWithQueuedSends() {
-    Fixture f(true); f.Start();
-    for (int i = 0; i < 512; ++i)
-        Require(f.Send(9, BUFFER(508, 9)), "post send before EOF");
-    f.Wait([&] { return f.State.Admissions.size() == 512; }, "EOF bulk admissions");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Completions.size() < 512, "EOF test requires pending sends");
-        for (auto result : f.State.Admissions) Require(result == ESessionSendAdmission::Accepted, "EOF bulk accepted");
-    }
-    BOOST_ERROR_CODE ec; f.Client.shutdown(TCPSOCKET::shutdown_send, ec);
-    Require(!ec, "EOF half close with sends pending");
-    auto frame = Frame(9, std::vector<uint8>(508, 9));
-    std::vector<uint8> expected; expected.reserve(frame.size() * 512);
-    for (int i = 0; i < 512; ++i) expected.insert(expected.end(), frame.begin(), frame.end());
-    Require(ReadExact(f.Client, expected.size()) == expected, "drain queued sends after EOF");
-    f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(!f.State.CloseReason && f.State.Completions.size() == 512, "EOF close after all completions");
-    for (const auto& result : f.State.Completions) Require(!result.first && result.second == 512, "EOF send completion");
-}
-
-static void TestStopWithQueuedSends() {
-    Fixture f(true); f.Start();
-    for (int i = 0; i < 512; ++i)
-        Require(f.Send(10, BUFFER(508, 10)), "post send before stop");
-    f.Wait([&] { return f.State.Admissions.size() == 512; }, "stop bulk admissions");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Completions.size() < 512, "stop test requires pending sends");
-        for (auto result : f.State.Admissions) Require(result == ESessionSendAdmission::Accepted, "stop bulk accepted");
-    }
-    Require(f.Session->RequestStop(), "request stop with sends pending");
-    Require(f.Send(11, BUFFER{11}), "post send after stop request");
-    f.Wait([&] { return f.State.Admissions.size() == 513; }, "post-stop admission");
-    {
-        EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-        Require(f.State.Admissions.back() == ESessionSendAdmission::Closing,
-            "stop was processed before post-stop admission");
-        Require(f.State.Completions.size() < 511,
-            "stop was processed while at least one send remained queued");
-    }
-    auto frame = Frame(10, std::vector<uint8>(508, 10));
-    std::vector<uint8> expected; expected.reserve(frame.size() * 512);
-    for (int i = 0; i < 512; ++i) expected.insert(expected.end(), frame.begin(), frame.end());
-    Require(ReadExact(f.Client, expected.size()) == expected, "drain queued sends after stop");
-    f.WaitClosed();
-    EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex);
-    Require(!f.State.CloseReason && f.State.Closed == 1 && f.State.Completions.size() == 512,
-        "stop closes once after all completions");
-    for (const auto& result : f.State.Completions) Require(!result.first && result.second == 512, "stop send completion");
-}
-
-class UTestSessionListener final : public UListener {
+class UTestPawn final : public UPawn {
 public:
-    UTestSessionListener(SHPTR<UCoreInstance> core, IOCONTEXT& context, FUNC<void(TCPSOCKET)> accepted)
-        : UListener{std::move(core), context}, _Accepted{std::move(accepted)} {}
-protected:
-    void HandleAcceptedSocket(TCPSOCKET socket) override { _Accepted(std::move(socket)); }
-private:
-    FUNC<void(TCPSOCKET)> _Accepted;
+	STATIC_CONSTEXPR uint32 ActorTypeID{ static_cast<uint32>(EActorType::UserStart) };
+	explicit UTestPawn(SHPTR<UCoreInstance> coreInstance)
+		: UPawn{ std::move(coreInstance) } {}
+	uint32 GetActorTypeID() const noexcept override { return ActorTypeID; }
 };
 
-static void TestListenerConnection() {
-    struct FListenerFixture {
-        FTestState State;
-        IOCONTEXT Context;
-        ASIO::executor_work_guard<IOCONTEXT::executor_type> Guard{ASIO::make_work_guard(Context)};
-        SHPTR<UCoreInstance> CoreInstance{MakeShared<UCoreInstance>()};
-        SHPTR<UTestSession> Session;
-        SHPTR<UTestSessionListener> Listener;
-        std::vector<std::thread> Workers;
-        ~FListenerFixture() {
-            BOOST_ERROR_CODE ec;
-            if (Listener) Listener->Stop(ec);
-            Guard.reset(); Context.stop();
-            for (auto& worker : Workers) if (worker.joinable()) worker.join();
-            Session.reset(); Listener.reset();
-        }
-    } f;
-    TCPACCEPTOR probe{f.Context, TCP_ENDPOINT{ASIO::ip::address_v4::loopback(), 0}};
-    const TCP_ENDPOINT endpoint = probe.local_endpoint(); probe.close();
-    f.Listener = MakeShared<UTestSessionListener>(f.CoreInstance, f.Context, [&f](TCPSOCKET socket) {
-        auto session = MakeShared<UTestSession>(f.CoreInstance, std::move(socket), f.State);
-        const bool started = session->Start();
-        { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); f.Session = std::move(session); if (!started) ++f.State.Exceptions; }
-        f.State.Changed.notify_all();
-    });
-    BOOST_ERROR_CODE ec;
-    Require(f.Listener->Start(endpoint, [&f](const BOOST_ERROR_CODE&) {
-        { EXCLUSIVE_LOCK_GUARD lock(f.State.Mutex); ++f.State.Exceptions; }
-        f.State.Changed.notify_all();
-    }, ec) && !ec, "listener start");
-    for (int i = 0; i < 2; ++i) f.Workers.emplace_back([&f] { f.Context.run(); GThreadMemoryCache.FlushToCentral(); });
-    IOCONTEXT clientContext; TCPSOCKET client{clientContext}; client.connect(endpoint);
-    Write(client, Frame(55, {5,5}));
-    {
-        std::unique_lock<SHARED_MUTEX> lock(f.State.Mutex);
-        Require(f.State.Changed.wait_for(lock, 5s, [&] { return !f.State.Packets.empty() || f.State.Exceptions; }), "listener session packet");
-        Require(!f.State.Exceptions && f.State.Packets[0].first == 55, "listener moves socket to session");
-        Require(f.Session->RequestStop(), "listener session stop");
-        Require(f.State.Changed.wait_for(lock, 5s, [&] { return f.State.Closed; }), "listener session closed");
-    }
+class UTestRoom final : public URoom {
+public:
+	STATIC_CONSTEXPR uint32 RoomTypeID{ static_cast<uint32>(ERoomType::UserStart) };
+	explicit UTestRoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActors)
+		: URoom{ std::move(coreInstance), context, roomID, maxActors } {}
+	uint32 GetRoomTypeID() const noexcept override { return RoomTypeID; }
+};
+
+class UOtherRoom final : public URoom {
+public:
+	STATIC_CONSTEXPR uint32 RoomTypeID{ static_cast<uint32>(ERoomType::UserStart) + 1 };
+	explicit UOtherRoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActors)
+		: URoom{ std::move(coreInstance), context, roomID, maxActors } {}
+	uint32 GetRoomTypeID() const noexcept override { return RoomTypeID; }
+};
+
+// ---- Group 1 네트워크 테스트용 세션·리스너 ----
+
+struct FSessionProbeState {
+	SHARED_MUTEX Lock;
+	COND_VARIABLE Changed;
+	VECTOR<FPacketPayload> ReceivedPackets;
+	uint64 DisconnectedCount{ 0 };
+	bool ThrowOnPacket{ false };
+	SHPTR<USession> LastAcceptedSession;
+};
+
+class UProbeSession final : public USession {
+public:
+	UProbeSession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket, FSessionProbeState& state)
+		: USession{ std::move(coreInstance), std::move(socket) },
+		  _State{ state } {}
+
+protected:
+	void OnUnboundPacket(const FPacketView& packet) override
+	{
+		bool shouldThrow{ false };
+		{
+			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
+			shouldThrow = _State.ThrowOnPacket;
+			if (!shouldThrow)
+				_State.ReceivedPackets.push_back(packet.Detach());
+		}
+		_State.Changed.notify_all();
+		if (shouldThrow)
+			throw std::runtime_error("probe packet exception");
+	}
+
+	void OnDisconnected() override
+	{
+		{
+			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
+			++_State.DisconnectedCount;
+		}
+		_State.Changed.notify_all();
+	}
+
+private:
+	FSessionProbeState& _State;
+};
+
+class UProbeListener final : public UListener {
+public:
+	UProbeListener(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, FSessionProbeState& state, MILLISECONDS idleTimeout)
+		: UListener{ std::move(coreInstance), context },
+		  _State{ state },
+		  _IdleTimeout{ idleTimeout } {}
+
+protected:
+	void HandleAcceptedSocket(TCPSOCKET socket) override
+	{
+		const auto coreInstance = GetCoreInstance();
+		const auto networkManager = coreInstance ? coreInstance->GetNetworkManager() : nullptr;
+		if (!networkManager)
+			return;
+
+		const auto session = MakeShared<UProbeSession>(coreInstance, std::move(socket), _State);
+		session->SetIdleTimeout(_IdleTimeout);
+		{
+			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
+			_State.LastAcceptedSession = session;
+		}
+		_State.Changed.notify_all();
+		networkManager->RequestAddSession(session);
+		session->Receive();
+	}
+
+private:
+	FSessionProbeState& _State;
+	MILLISECONDS _IdleTimeout{ 0 };
+};
+
+// Group 1: SafeGuard (FPacketView NO_COPY + Detach 불변 복사 + 4스레드 무잠금 동시 읽기 + 경계값 거절)
+void TestSafeGuardContracts()
+{
+	ARRAY<uint8, 32> raw{};
+	for (uint64 i = 0; i < raw.size(); ++i)
+		raw[i] = static_cast<uint8>(0x30 + i);
+
+	FPacketPayload detached;
+	{
+		const FPacketView view{ 42, raw.data(), raw.size() };
+		Require(view.GetType() == 42 && view.GetSize() == 32 && view.GetData() == raw.data() && !view.IsEmpty(),
+			"FPacketView accessors mismatch");
+		detached = view.Detach();
+	}
+	std::memset(raw.data(), 0xCC, raw.size());
+	Require(detached.IsValid() && detached.GetType() == 42 && detached.GetSize() == 32,
+		"Detached payload metadata mismatch");
+	for (uint64 i = 0; i < 32; ++i)
+		Require(detached.GetData()[i] == static_cast<uint8>(0x30 + i), "Detached payload corrupted");
+
+	ATOMIC_BOOL ok{ true };
+	THREADS workers;
+	workers.reserve(4);
+	for (int t = 0; t < 4; ++t) {
+		workers.emplace_back([payload = detached, &ok]() {
+			for (int iter = 0; iter < 4000; ++iter) {
+				if (payload.GetType() != 42 || payload.GetSize() != 32) {
+					ok.store(false, std::memory_order_relaxed);
+					return;
+				}
+				for (uint64 i = 0; i < 32; ++i) {
+					if (payload.GetData()[i] != static_cast<uint8>(0x30 + i)) {
+						ok.store(false, std::memory_order_relaxed);
+						return;
+					}
+				}
+			}
+		});
+	}
+	for (auto& w : workers)
+		w.join();
+	Require(ok.load(std::memory_order_acquire), "Concurrent zero-lock payload read failed");
+
+	const FPacketView emptyView{ 9, nullptr, 0 };
+	const FPacketPayload emptyDetached = emptyView.Detach();
+	Require(emptyDetached.IsValid() && emptyDetached.IsEmpty() && emptyDetached.GetBuffer() == nullptr,
+		"Empty payload must be valid and zero-allocated");
+	Require(!FPacketPayload::CopyFrom(0, raw.data(), 4).IsValid(), "type=0 must be rejected");
+	Require(!FPacketPayload::CopyFrom(7, nullptr, 4).IsValid(), "null body with size>0 must be rejected");
+	Require(!FPacketPayload::CopyFrom(7, raw.data(), PACKET_MAX_BODY_SIZE + 1).IsValid(), "oversized payload must be rejected");
+	std::cout << "PASS Group 1: SafeGuard FPacketView/FPacketPayload contracts\n";
 }
 
-int main() {
-    int result = 0;
-    try {
-        TestReceive(); std::cout << "PASS fragmented, coalesced, empty, maximum and invalid frames\n";
-        TestFragmentedStream(); std::cout << "PASS varied fragmented packet stream\n";
-        TestGracefulSend(); std::cout << "PASS send ownership, FIFO, rejection and drain\n";
-        TestRepeatedStartAndCallbackStop(); std::cout << "PASS repeated start and callback-requested stop\n";
-        TestCompletionCallbackRequestsStop(); std::cout << "PASS send completion requests stop and late send\n";
-        TestStopBeforeStart(); std::cout << "PASS stop before start\n";
-        TestEOFAndException(); std::cout << "PASS EOF drain and packet exception\n";
-        TestEOFWithPartialPacket(); std::cout << "PASS EOF with complete and partial packets\n";
-        TestReceiveReset(); std::cout << "PASS receive connection reset\n";
-        TestCallbackExceptions(); std::cout << "PASS callback exceptions reported\n";
-        TestConcurrentAdmissions(); std::cout << "PASS concurrent send and stop\n";
-        TestConcurrentRequestIdentity(); std::cout << "PASS per-request results during concurrent stop\n";
-        TestAdmissionAndLifetime(); std::cout << "PASS admission boundaries and session lifetime\n";
-        TestUnownedSessionPostFailure(); std::cout << "PASS unowned post failure has no callbacks\n";
-        TestPendingReceiveLifetime(); std::cout << "PASS pending receive retains session\n";
-        TestInvalidPacketCancelsQueuedSends(); std::cout << "PASS packet error cancels queued sends\n";
-        TestEOFWithQueuedSends(); std::cout << "PASS EOF requested with queued sends\n";
-        TestStopWithQueuedSends(); std::cout << "PASS stop requested with queued sends\n";
-        TestListenerConnection(); std::cout << "PASS UListener accepted socket to USession\n";
-    } catch (const std::exception& e) { std::cerr << "FAIL " << e.what() << '\n'; result = 1; }
-    GThreadMemoryCache.FlushToCentral();
-    UCoreGlobal::DeleteInstance();
-    return result;
+// Group 2: UComponent / UPawn 컴파일 타임 static 부착·중복 거절·소멸 후 재부착 계약
+void TestComponentStaticContracts()
+{
+	auto coreInstance = MakeShared<UCoreInstance>();
+	Require(coreInstance->Initialize(), "CoreInstance init failed");
+
+	auto pawnA = MakeShared<UTestPawn>(coreInstance);
+	auto pawnB = MakeShared<UTestPawn>(coreInstance);
+	auto comp1 = MakeShared<UTestCustomComponent>(coreInstance);
+	auto comp2 = MakeShared<UTestCustomComponent>(coreInstance);
+
+	Require(pawnA->AddComponent(comp1) && comp1->HasOwner(), "AddComponent failed");
+	Require(!pawnA->AddComponent(comp2) && !comp2->HasOwner(), "Duplicate slot must be rejected");
+	Require(!pawnB->AddComponent(comp1), "Already-owned component must be rejected");
+	Require(pawnA->GetComponent<UTestCustomComponent>() == comp1, "static_pointer_cast GetComponent mismatch");
+	Require(pawnA->GetSession() == nullptr, "Pawn without session must return nullptr");
+
+	pawnA.reset();
+	Require(!comp1->HasOwner(), "Owner WKPTR must expire when pawnA dies");
+	Require(pawnB->AddComponent(comp1) && pawnB->GetComponent<UTestCustomComponent>() == comp1,
+		"Re-attach after owner expiry failed");
+	std::cout << "PASS Group 2: UComponent/UPawn static contracts\n";
+}
+
+// Group 3: URoomManager TypeID static_pointer_cast 조회 + SnapshotRooms 정렬 + 크로스-스트랜드 방 이동 계약
+void TestRoomManagerAndTransferContracts()
+{
+	auto coreInstance = MakeShared<UCoreInstance>();
+	Require(coreInstance->Initialize(), "CoreInstance init failed");
+	auto& ioContext = coreInstance->GetNetworkManager()->GetIOContext();
+	auto roomManager = coreInstance->GetRoomManager();
+
+	auto room2 = MakeShared<UTestRoom>(coreInstance, ioContext, 2, 100);
+	auto room1 = MakeShared<UTestRoom>(coreInstance, ioContext, 1, 100);
+	auto other = MakeShared<UOtherRoom>(coreInstance, ioContext, 3, 100);
+	Require(roomManager->AddRoom(room2) && roomManager->AddRoom(room1) && roomManager->AddRoom(other),
+		"AddRoom failed");
+
+	// TypeID 일치 시 static_pointer_cast 성공, 불일치 시 nullptr 반환
+	Require(roomManager->FindRoomAs<UTestRoom>(1) == room1, "FindRoomAs matching TypeID failed");
+	Require(roomManager->FindRoomAs<UTestRoom>(3) == nullptr, "FindRoomAs mismatched TypeID must return nullptr");
+	Require(roomManager->FindRoomAs<UOtherRoom>(3) == other, "FindRoomAs other TypeID failed");
+
+	const auto snapshot = roomManager->SnapshotRooms();
+	Require(snapshot.size() == 3 && snapshot[0]->GetRoomID() == 1 && snapshot[1]->GetRoomID() == 2 && snapshot[2]->GetRoomID() == 3,
+		"SnapshotRooms must be sorted by roomID ascending");
+
+	// 크로스-스트랜드 입·퇴장 및 무잠금 근사 인원 수 검증
+	auto actor = MakeShared<UTestPawn>(coreInstance);
+	SHARED_MUTEX lock;
+	COND_VARIABLE cv;
+	bool transferDone{ false };
+	bool transferOk{ false };
+
+	Require(room1->RequestEnter(actor, [&](const bool entered1) {
+		if (!entered1 || room1->GetApproximateActorCount() != 1 || actor->GetRoomID() != 1) {
+			{ EXCLUSIVE_LOCK_GUARD g{ lock }; transferDone = true; }
+			cv.notify_all();
+			return;
+		}
+		room1->RequestLeaveWithCallback(actor, [&](const bool left1) {
+			if (!left1 || room1->GetApproximateActorCount() != 0) {
+				{ EXCLUSIVE_LOCK_GUARD g{ lock }; transferDone = true; }
+				cv.notify_all();
+				return;
+			}
+			room2->RequestEnter(actor, [&](const bool entered2) {
+				{
+					EXCLUSIVE_LOCK_GUARD g{ lock };
+					transferOk = entered2 && room2->GetApproximateActorCount() == 1 && actor->GetRoomID() == 2;
+					transferDone = true;
+				}
+				cv.notify_all();
+			});
+		});
+	}), "RequestEnter failed");
+
+	THREAD worker{ [&ioContext]() { ioContext.run(); } };
+	{
+		std::unique_lock<SHARED_MUTEX> lk{ lock };
+		Require(cv.wait_for(lk, 3s, [&]() { return transferDone; }), "Cross-strand transfer timed out");
+		Require(transferOk, "Cross-strand transfer state mismatch");
+	}
+	coreInstance->GetNetworkManager()->Shutdown();
+	worker.join();
+	roomManager->ClearRooms();
+	std::cout << "PASS Group 3: URoomManager static TypeID & cross-strand transfer contracts\n";
+}
+
+// Group 4: USession TCP 분할/병합, 예외 격리, 1,020B 초과 차단, 1 MiB 백프레셔, 유휴 타임아웃 계약
+uint16 PickFreeLoopbackPort()
+{
+	IOCONTEXT io;
+	TCPACCEPTOR probe{ io, TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), 0 } };
+	const uint16 port = probe.local_endpoint().port();
+	BOOST_ERROR_CODE ignored;
+	probe.close(ignored);
+	return port;
+}
+
+void TestSessionNetworkAndIdleTimeoutContracts()
+{
+	auto coreInstance = MakeShared<UCoreInstance>();
+	Require(coreInstance->Initialize(), "CoreInstance init failed");
+	auto networkManager = coreInstance->GetNetworkManager();
+	auto& ioContext = networkManager->GetIOContext();
+
+	FSessionProbeState state;
+	auto listener = MakeShared<UProbeListener>(coreInstance, ioContext, state, MILLISECONDS{ 250 });
+	BOOST_ERROR_CODE ec;
+	const uint16 port = PickFreeLoopbackPort();
+	Require(port != 0, "Invalid listener port");
+	Require(networkManager->StartListener(listener, TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
+		[](const BOOST_ERROR_CODE&) {}, ec), "StartListener failed");
+
+	THREAD worker{ [&ioContext]() { ioContext.run(); } };
+	auto shutdownAll = [&]() {
+		networkManager->Shutdown();
+		if (worker.joinable())
+			worker.join();
+	};
+
+	try {
+		IOCONTEXT clientIo;
+		const TCP_ENDPOINT ep{ ASIO::ip::address_v4::loopback(), port };
+
+		// 4-1. 1B 분할 전송 + 2패킷 병합 전송 + 타이머 리셋 유지
+		{
+			TCPSOCKET sock{ clientIo };
+			sock.connect(ep);
+			const char msg1[] = "Hello";
+			const char msg2[] = "World";
+			const BUFFER f1 = BuildWireFrame(11, 5, reinterpret_cast<const uint8*>(msg1), 5);
+			const BUFFER f2 = BuildWireFrame(12, 5, reinterpret_cast<const uint8*>(msg2), 5);
+			for (uint64 i = 0; i < f1.size(); ++i)
+				ASIO::write(sock, ASIO::buffer(f1.data() + i, 1));
+			BUFFER combined;
+			combined.insert(combined.end(), f1.begin(), f1.end());
+			combined.insert(combined.end(), f2.begin(), f2.end());
+			ASIO::write(sock, ASIO::buffer(combined.data(), combined.size()));
+
+			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
+			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.ReceivedPackets.size() >= 3; }),
+				"Fragmented/coalesced packets not received");
+			Require(state.ReceivedPackets[0].GetType() == 11 && state.ReceivedPackets[2].GetType() == 12,
+				"Packet types mismatch");
+			sock.close();
+		}
+
+		// 4-2. 유휴 타임아웃(250ms) 자동 차단 검증: 아무것도 안 보내면 서버가 연결을 닫는다.
+		{
+			uint64 prevDisc{ 0 };
+			{
+				SHARED_LOCK_GUARD lk{ state.Lock };
+				prevDisc = state.DisconnectedCount;
+			}
+			TCPSOCKET idleSock{ clientIo };
+			idleSock.connect(ep);
+			// 소켓에서 EOF를 기다린다(250ms 타임아웃이므로 2초 내에 서버가 끊어야 한다).
+			ARRAY<uint8, 16> sink{};
+			BOOST_ERROR_CODE readEc;
+			const uint64 n = static_cast<uint64>(idleSock.read_some(ASIO::buffer(sink.data(), sink.size()), readEc));
+			Require(n == 0 && static_cast<bool>(readEc), "Idle client was not disconnected by idle timeout");
+
+			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
+			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.DisconnectedCount > prevDisc; }),
+				"Server session OnDisconnected not fired on idle timeout");
+		}
+
+		// 4-3. 1,020B 초과 헤더 즉시 차단 검증
+		{
+			TCPSOCKET badSock{ clientIo };
+			badSock.connect(ep);
+			const BUFFER badHeader = BuildWireFrame(11, static_cast<uint16>(PACKET_MAX_BODY_SIZE + 1), nullptr, 0);
+			ASIO::write(badSock, ASIO::buffer(badHeader.data(), badHeader.size()));
+			ARRAY<uint8, 16> sink{};
+			BOOST_ERROR_CODE readEc;
+			const uint64 n = static_cast<uint64>(badSock.read_some(ASIO::buffer(sink.data(), sink.size()), readEc));
+			Require(n == 0 && static_cast<bool>(readEc), "Oversized header did not close connection");
+		}
+
+		// 4-4. ProcessingData 예외 격리 검증 (해당 연결만 종료, 서버 워커 생존)
+		{
+			{
+				EXCLUSIVE_LOCK_GUARD lk{ state.Lock };
+				state.ThrowOnPacket = true;
+			}
+			TCPSOCKET excSock{ clientIo };
+			excSock.connect(ep);
+			const BUFFER ping = BuildWireFrame(77, 0, nullptr, 0);
+			ASIO::write(excSock, ASIO::buffer(ping.data(), ping.size()));
+			ARRAY<uint8, 16> sink{};
+			BOOST_ERROR_CODE readEc;
+			const uint64 n = static_cast<uint64>(excSock.read_some(ASIO::buffer(sink.data(), sink.size()), readEc));
+			Require(n == 0 && static_cast<bool>(readEc), "Exception in ProcessingData did not close session");
+			{
+				EXCLUSIVE_LOCK_GUARD lk{ state.Lock };
+				state.ThrowOnPacket = false;
+			}
+		}
+
+		// 4-5. 예외 이후에도 서버가 살아 있어 새 연결의 패킷을 정상 수신하는지 확인
+		{
+			uint64 beforeCount{ 0 };
+			{
+				SHARED_LOCK_GUARD lk{ state.Lock };
+				beforeCount = static_cast<uint64>(state.ReceivedPackets.size());
+			}
+			TCPSOCKET healthySock{ clientIo };
+			healthySock.connect(ep);
+			const BUFFER okFrame = BuildWireFrame(88, 0, nullptr, 0);
+			ASIO::write(healthySock, ASIO::buffer(okFrame.data(), okFrame.size()));
+			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
+			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.ReceivedPackets.size() > beforeCount; }),
+				"Server did not survive previous session exception");
+			healthySock.close();
+		}
+	}
+	catch (...) {
+		shutdownAll();
+		throw;
+	}
+	shutdownAll();
+	std::cout << "PASS Group 4: USession framing, idle timeout, oversize reject, exception isolation\n";
+}
+}
+
+int main()
+{
+	try {
+		UCoreGlobal::GetInstance();
+		TestSafeGuardContracts();
+		TestComponentStaticContracts();
+		TestRoomManagerAndTransferContracts();
+		TestSessionNetworkAndIdleTimeoutContracts();
+		std::cout << "RESULT 4/4 SessionContracts groups passed\n";
+		return 0;
+	}
+	catch (const std::exception& ex) {
+		std::cerr << "[FAIL] SessionContracts: " << ex.what() << '\n';
+		return 1;
+	}
 }

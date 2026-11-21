@@ -8,9 +8,10 @@
 
 SPACE_H(Core)
 
-// 세션당 송신 대기열 누적 상한(느린 클라이언트 OOM 방어)과 1회 Scatter-Gather 배치 최대 건수다.
+// 세션당 송신 대기열 누적 상한(느린 클라이언트 OOM 방어), 1회 Scatter-Gather 배치 최대 건수, 기본 유휴 타임아웃이다.
 STATIC_CONSTEXPR uint64 SESSION_MAX_SEND_QUEUE_BYTES{ 1024ull * 1024ull };
 STATIC_CONSTEXPR uint64 SESSION_MAX_WRITE_BATCH_COUNT{ 64 };
+STATIC_CONSTEXPR MILLISECONDS SESSION_DEFAULT_IDLE_TIMEOUT{ 30000 };
 
 class CORE_DLL USession abstract : public UComponent, public IHashable<USession> {
 protected:
@@ -30,6 +31,10 @@ public:
     // 세션은 객체 주소를 기준으로 식별한다.
     uint64 GetHash() const noexcept final override;
     bool IsEqual(const USession& other) const noexcept final override;
+
+    // 어느 스레드에서나 호출할 수 있다. Receive 시작 전에 유휴 수신 타임아웃을 설정한다(0ms이면 비활성화).
+    // 지정 시간 동안 수신 데이터가 전혀 없으면 Warning을 남기고 이 Session의 strand에서 연결을 닫는다.
+    void SetIdleTimeout(MILLISECONDS timeout) noexcept;
 
     // 같은 버퍼를 사용하므로 수신 완료 처리 전에 중복 호출하지 않는다.
     // 어느 스레드에서나 호출할 수 있다. 수신 시작과 완료 처리는 이 Session의 strand에서 실행되며,
@@ -69,11 +74,11 @@ public:
     // io_context가 종료되거나 중지되면 실행되지 않을 수 있다.
     void Close();
 
-protected:
     // 어느 스레드에서나 호출할 수 있다. task를 이 Session의 strand에 게시하며, 실행이 끝날 때까지 Session을 유지한다.
     // Session이 shared_ptr 소유가 아니거나 task가 비어 있으면 false다. 게시 예외는 호출자에게 전달한다.
     bool PostToSession(FUNC<void()> task);
 
+protected:
     // 완성된 패킷 뷰를 소유자 UPawn에 전달한다.
     // 부착된 소유자(UPawn)가 있으면 owner->OnReceivePacket으로 넘기고,
     // 아직 소유자가 부착되지 않은 연결(예: 로그인 전 핸드셰이크)이면 OnUnboundPacket으로 넘긴다.
@@ -104,10 +109,17 @@ private:
     // 이 Session의 strand에서 ProcessingData가 던진 예외를 받았을 때 호출한다. 연결을 닫고 reason을 Error로 기록한다.
     // 닫기와 로그 문장 생성의 할당 예외는 호출자에게 전달한다.
     void CloseOnProcessingFailure(STRINGVIEW reason);
+    // 이 Session의 strand에서 호출한다. 유휴 타임아웃이 설정돼 있으면 타이머를 현재 시점 기준으로 재설정한다.
+    void ResetIdleTimerOnStrand();
+    // 이 Session의 strand에서 호출한다. 진행 중인 유휴 타임아웃 타이머를 취소한다.
+    void CancelIdleTimerOnStrand() noexcept;
     void CombinePacket(const BOOST_ERROR_CODE& error, uint64 receivedBytes);
 
     TCPSOCKET                               _Socket;
     ASIO::strand<ASIO::any_io_executor>     _Strand;
+    BOOST_STEADY_TIMER                      _IdleTimer;
+    ATOMIC_UINT64                           _IdleTimeoutMs{ 0 };
+    uint64                                  _IdleGeneration{ 0 }; // 이 Session의 strand에서만 접근한다.
     DEQUE<SHPTR<const BUFFER>>              _PendingSendQueue;     // 이 Session의 strand에서만 사용한다.
     VECTOR<SHPTR<const BUFFER>>             _SendingBatch;         // 현재 async_write 중인 불변 프레임 수명 유지.
     VECTOR<ASIO::const_buffer>              _SendingBufferView;    // Scatter-Gather 뷰 버퍼(재사용).

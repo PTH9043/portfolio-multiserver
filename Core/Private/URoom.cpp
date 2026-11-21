@@ -57,6 +57,24 @@ void URoom::RequestLeave(const SHPTR<UActor>& actor)
     });
 }
 
+// 액터 퇴장을 방 strand에 게시하고 완료 여부를 onComplete로 전달한다(방 이동 직렬화용).
+bool URoom::RequestLeaveWithCallback(const SHPTR<UActor>& actor, FUNC<void(bool)> onComplete)
+{
+    RUNTIME_TRACE_SCOPE(URoom, RequestLeaveWithCallback, GetRuntimeTraceID());
+    const auto room = ThisWeak<URoom>().lock();
+    if (!room || !actor)
+        return false;
+
+    const auto submission = RUNTIME_TRACE_EVENT(Submit, URoom, RequestLeaveWithCallback, GetRuntimeTraceID());
+    ASIO::post(_Strand, [room, actor, onComplete = std::move(onComplete), submission]() mutable {
+        RUNTIME_TRACE_CALLBACK(URoom, RequestLeaveWithCallback, room->GetRuntimeTraceID(), submission);
+        const bool left = room->LeaveOnStrand(actor);
+        if (onComplete)
+            onComplete(left);
+    });
+    return true;
+}
+
 // 송신 프레임을 1회만 조립해 방 strand에서 전체 액터에게 공유 전송한다.
 void URoom::RequestBroadcast(const void* data, uint64 packetSize, uint16 packetType)
 {
@@ -106,6 +124,7 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
     const uint64 index{ static_cast<uint64>(_ActorContainer.size()) };
     _ActorIndexMap.emplace(actor.get(), index);
     _ActorContainer.push_back(actor);
+    _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
     actor->SetRoomID(_RoomID);
     OnActorEntered(actor);
     return true;
@@ -132,6 +151,7 @@ bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
     }
     _ActorContainer.pop_back();
     _ActorIndexMap.erase(it);
+    _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
 
     removedActor->ClearRoomID(_RoomID);
     OnActorLeft(removedActor);

@@ -9,6 +9,12 @@ SPACE_H(Core)
 
 class UActor;
 
+// 방 종류를 식별하는 고정 키다. 상위 프로젝트(Server 등)는 UserStart 이후 값을 할당해 RTTI 없이 판별한다.
+enum class ERoomType : uint32 {
+    None = 0,
+    UserStart = 1000
+};
+
 // 액터(UActor)들이 머무는 추상 공간의 기반 클래스다.
 // 방 내부 상태(_ActorContainer·_ActorIndexMap)와 파생 방의 도메인 상태는 모두 이 Room의 strand에서만
 // 읽고 바꾸므로 방 내부에 별도 mutex를 두지 않으며, 다른 Room의 작업과는 동시에 실행될 수 있다.
@@ -25,11 +31,17 @@ public:
     virtual ~URoom() override;
     NO_COPY(URoom)
 
+    // 방의 고정 유형 ID를 돌려준다. 파생 방은 정적 RoomTypeID와 일치하는 값을 반환해 static_pointer_cast 안전성을 보장한다.
+    virtual uint32 GetRoomTypeID() const noexcept { return static_cast<uint32>(ERoomType::None); }
+
     // 생성 시 확정된 방 식별자다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
     uint64 GetRoomID() const noexcept { return _RoomID; }
 
     // 생성 시 지정된 방의 최대 액터 정원이다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
     uint32 GetMaxActorCount() const noexcept { return _MaxActorCount; }
+
+    // 어느 스레드에서나 잠금 없이 읽을 수 있는 현재 방 인원 수 스냅샷이다(입·퇴장 시 strand에서 원자 갱신).
+    uint64 GetApproximateActorCount() const noexcept { return _PublishedActorCount.load(std::memory_order_relaxed); }
 
     // 어느 스레드에서나 호출할 수 있다. true는 게시 성공이며 정원·중복·CanEnter 판정과 입장 결과는
     // onComplete(선택)로 이 Room의 strand에서 전달한다.
@@ -41,6 +53,10 @@ public:
     // 이 Room의 strand에서 실행된다. actor가 비어 있거나 목록에 없으면 아무것도 하지 않는다.
     // Room이 shared_ptr 소유가 아니면 std::bad_weak_ptr을 던지며, 게시 예외는 호출자에게 전달한다.
     void RequestLeave(const SHPTR<UActor>& actor);
+
+    // 어느 스레드에서나 호출할 수 있다. 방 이동처럼 퇴장 완료 시점을 알아야 할 때 사용하며,
+    // LeaveOnStrand 결과를 onComplete(선택)로 이 Room의 strand에서 알린다.
+    bool RequestLeaveWithCallback(const SHPTR<UActor>& actor, FUNC<void(bool)> onComplete = nullptr);
 
     // 어느 스레드에서나 호출할 수 있다. 이 Room의 strand에서 현재 참가 중인 통신 액터(GetSession() != nullptr)에
     // 송신을 요청한다. data와 packetSize는 헤더를 제외한 본문과 본문 크기이며 호출 중에 복사한다.
@@ -93,6 +109,7 @@ private:
 
     uint64 _RoomID{ 0 };
     uint32 _MaxActorCount{ 0 };
+    ATOMIC_UINT64 _PublishedActorCount{ 0 }; // 방 목록 조회용 무잠금 인원 수 스냅샷.
     ASIO::strand<IOCONTEXT::executor_type> _Strand;
     ACTOR_CONTAINER _ActorContainer; // 이 Room의 strand에서만 접근한다.
     ACTOR_INDEX_MAP _ActorIndexMap;  // 이 Room의 strand에서만 접근한다.

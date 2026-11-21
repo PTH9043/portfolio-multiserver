@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreDefine.h"
+#include "USession.h"
 #include "UServerInput.h"
 
 SPACE_H(Core)
@@ -9,9 +10,11 @@ SPACE_T
 
 SPACE_H(Server)
 
+class UNicknameRegistry;
+
 using namespace Core;
 
-// 서버 앱이다. 127.0.0.1의 지정 포트에서 접속을 받아 리스너와 워커를 운영한다.
+// 서버 앱이다. 127.0.0.1의 지정 포트에서 접속을 받아 고정 4채널·리스너·워커를 운영한다.
 class UServerApp final
 {
 public:
@@ -19,10 +22,11 @@ public:
 	~UServerApp();
 	NO_COPY(UServerApp);
 
-	// 제어 스레드에서 RegisterWorkers보다 먼저 호출한다. Core를 준비하고 127.0.0.1:port에서 리스너를 시작한다.
+	// 제어 스레드에서 RegisterWorkers보다 먼저 호출한다. Core·고정 방 4개를 준비하고 127.0.0.1:port에서 리스너를 시작한다.
+	// sessionIdleTimeout이 0ms이면 유휴 타임아웃을 비활성화한다.
 	// 성공하면 true, 이미 시작했거나 준비·리스너 시작에 실패하면 false다. 실패 원인은 콘솔에 쓴다.
 	// 리스너의 accept가 오류로 끝나면 Logger에 Error로 남기고 네트워크 실패로 서버 종료를 요청한다.
-	bool Start(uint16 port);
+	bool Start(uint16 port, MILLISECONDS sessionIdleTimeout = SESSION_DEFAULT_IDLE_TIMEOUT);
 
 	// 제어 스레드에서 호출한다. 워커 함수는 JoinWorkers 전까지 실행되지 않는다.
 	bool RegisterWorkers(uint32 networkWorkerCount);
@@ -66,6 +70,7 @@ private:
 	bool _WorkersRegistered{ false };
 	uint16 _ListenPort{ 0 };
 	SHPTR<UCoreInstance> _CoreInstance;
+	SHPTR<UNicknameRegistry> _NicknameRegistry;
 	UQPTR<UServerInput> _ServerInput;
 };
 

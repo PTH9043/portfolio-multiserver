@@ -22,6 +22,8 @@ message CSLogin {
 // SC_LOGIN_RESULT
 message SCLoginResult {
   ELoginResult result = 1;
-  // 성공했을 때 기본 방의 현재 인원 수(자신 포함). 참가자 목록은 CSRoomUsers로 따로 요청한다.
+  // 성공했을 때 입장한 방의 현재 인원 수(자신 포함). 참가자 목록은 CSRoomUsers로 따로 요청한다.
   uint32 user_count = 2;
+  // 성공했을 때 자동 입장한 기본 방 ID.
+  uint32 room_id = 3;
 }

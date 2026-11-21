@@ -1,8 +1,8 @@
 # MultiServer — C++20 Boost.Asio 멀티플레이어 채팅 서버 & 런타임 관측 아키텍처
 
-> **기준일**: 2026-11-21 · **언어/스택**: C++20/Latest (MSVC v145, x64) · Boost.Asio 1.92.0 · Protocol Buffers v33.6 · Custom Memory Pool · Async `ULogger` · `CVTRACE1` + `.cvlog` 이중 관측 파이프라인
+> **기준일**: 2026-11-22 · **언어/스택**: C++20/Latest (MSVC v145, x64) · Boost.Asio 1.92.0 · Protocol Buffers v33.6 · Custom Memory Pool · Async `ULogger` · `CVTRACE1` + `.cvlog` 이중 관측 파이프라인
 >
-> 본 프로젝트는 **Core(DLL) – Server(EXE) – Protocol(Protobuf) – 별도 C# WinForms Client([../Client](../Client))** 4계층으로 분리된 고동시성 채팅 서버와, AI 협업 개발의 변경·프로토콜·런타임 호출을 직접 검증하기 위한 관측 도구(**ChangeViewer**) 연동 구조를 함께 구현·실측한 프로젝트입니다.
+> 본 프로젝트는 **Core(DLL) – Server(EXE) – Protocol(Protobuf) – 별도 C# WinForms Client([../Client](../Client))** 4계층으로 분리된 고동시성 다중 방 채팅 서버와, AI 협업 개발의 변경·프로토콜·런타임 호출을 직접 검증하기 위한 관측 도구(**ChangeViewer**) 연동 구조를 함께 구현·실측한 프로젝트입니다.
 
 ---
 
@@ -16,14 +16,14 @@
                                     │ TCP (127.0.0.1:<port>)
 ┌───────────────────────────────────▼────────────────────────────────────────┐
 │  Server (ServerApp.exe)                                                    │
-│  UServerApp ─ UServerListener ─ UServerSession (공용 HandlePacket<T>)      │
-│  UPlayer (불변 FPlayerInfo + WKPTR<USession>)                              │
-│  UGameRoom : Core::URoom (Strand 직렬화, 내부 mutex 0개, 25ms Coalescing)  │
+│  UServerApp ─ UServerListener ─ UServerSession (로그인 전 핸드셰이크 전용) │
+│  UPlayer (UPawn 컴포넌트 소유, 도메인 패킷·방 이동·전역 닉네임 RAII 관리)  │
+│  UGameRoom × 4 (로비/자유/전략/거래, 독립 Strand · 내부 mutex 0 · 25ms 병합)│
 ├────────────────────────────────────────────────────────────────────────────┤
-│  Core (Core.dll — Protobuf 비의존)                                         │
+│  Core (Core.dll — Protobuf 비의존 · dynamic_cast 0건)                      │
 │  UCoreInstance ─ UThreadManager / UNetworkManager / ULogger / URoomManager │
-│  UListener · USession (Shared Frame O(1), Scatter-Gather 64, 1 MiB Cap)    │
-│  UObject → UActor → UPawn → UCharacter · CustomMemory (TLS 캐시 메모리 풀) │
+│  UComponent · UPawn(CONUNORMAP) · USession(Shared Frame·1MiB Cap·유휴타이머)│
+│  FPacketView(NO_COPY) + FPacketPayload(Detach 불변) · CustomMemory TLS 풀  │
 │  RuntimeTrace (Off / FlightRecorder / AsyncStream → .cvtrace + .cvlog)     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -82,13 +82,19 @@ TCP 프레임 형식: `[uint16 type (LE)] [uint16 size (LE)] [Protobuf Body (0..
 
 | 방향 | 패킷 Enum | 번호 | 메시지 | 설명 / 한도 |
 |---|---|---:|---|---|
-| C → S | `CS_LOGIN` | 1 | `CSLogin` | 닉네임 2~12자(완성형 한글·영문·숫자), 중복 시 거절 |
+| C → S | `CS_LOGIN` | 1 | `CSLogin` | 닉네임 2~12자(완성형 한글·영문·숫자), 서버 전역 중복 시 거절 |
 | C → S | `CS_CHAT` | 2 | `CSChat` | 채팅 본문 1~200자 UTF-8 (초과 시 Warning, 연결 유지) |
-| C → S | `CS_ROOM_USERS` | 3 | `CSRoomUsers` | `offset` 기준 참가자 목록 요청 |
-| S → C | `SC_LOGIN_RESULT` | 1 | `SCLoginResult` | `ELoginResult` + 현재 방 인원 수 |
-| S → C | `SC_CHAT` | 2 | `SCChat` | 발신자 닉네임 + 채팅 본문 (방 전체 브로드캐스트) |
-| S → C | `SC_ROOM_USER_COUNT` | 3 | `SCRoomUserCount` | 25 ms 병합 인원 수 알림 (최대 1,000명) |
+| C → S | `CS_ROOM_USERS` | 3 | `CSRoomUsers` | `offset` 기준 현재 방 참가자 목록 요청 |
+| C → S | `CS_ROOM_LIST` | 4 | `CSRoomList` | 고정 4채널 목록·인원 수 조회 |
+| C → S | `CS_JOIN_ROOM` | 5 | `CSJoinRoom` | 지정 방으로 크로스-스트랜드 이동 요청 |
+| C → S | `CS_PING` | 6 | `CSPing` | 유휴 연결 유지 및 RTT 측정 하트비트 |
+| S → C | `SC_LOGIN_RESULT` | 1 | `SCLoginResult` | `ELoginResult` + 입장 방 ID + 현재 인원 수 |
+| S → C | `SC_CHAT` | 2 | `SCChat` | 발신자 닉네임 + 채팅 본문 (현재 방 전체 브로드캐스트) |
+| S → C | `SC_ROOM_USER_COUNT` | 3 | `SCRoomUserCount` | 25 ms 병합 인원 수 알림 (방당 최대 1,000명) |
 | S → C | `SC_ROOM_USERS` | 4 | `SCRoomUsers` | 최대 20명 닉네임 목록 + `total` |
+| S → C | `SC_ROOM_LIST` | 5 | `SCRoomList` | 고정 4채널(`로비`/`자유`/`전략`/`거래`) 요약 목록 |
+| S → C | `SC_JOIN_ROOM_RESULT` | 6 | `SCJoinRoomResult` | `EJoinRoomResult` + 최종 소속 방 ID + 인원 수 |
+| S → C | `SC_PONG` | 7 | `SCPong` | `CS_PING` 타임스탬프 즉시 에코 |
 
 ---
 

@@ -2,6 +2,7 @@
 #include "URoomManager.h"
 #include "URoom.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "RuntimeTrace.h"
@@ -43,6 +44,22 @@ SHPTR<URoom> URoomManager::FindRoom(const uint64 roomID) const
 
 	const auto it = _RoomContainer.find(roomID);
 	return it != _RoomContainer.end() ? it->second : nullptr;
+}
+
+// 등록된 모든 방을 RoomID 오름차순 스냅샷으로 수집한다(잠금 0개).
+VECTOR<SHPTR<URoom>> URoomManager::SnapshotRooms() const
+{
+	RUNTIME_TRACE_SCOPE(URoomManager, SnapshotRooms, GetRuntimeTraceID());
+	VECTOR<SHPTR<URoom>> rooms;
+	rooms.reserve(_RoomContainer.size());
+	for (const auto& entry : _RoomContainer) {
+		if (entry.second)
+			rooms.push_back(entry.second);
+	}
+	std::sort(rooms.begin(), rooms.end(), [](const SHPTR<URoom>& left, const SHPTR<URoom>& right) {
+		return left->GetRoomID() < right->GetRoomID();
+	});
+	return rooms;
 }
 
 // 서버 종료 정리 단계에서 등록된 모든 방 참조를 비운다.

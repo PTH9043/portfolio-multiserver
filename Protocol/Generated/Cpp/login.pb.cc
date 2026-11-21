@@ -31,7 +31,8 @@ inline constexpr SCLoginResult::Impl_::Impl_(
     ::_pbi::ConstantInitialized) noexcept
       : _cached_size_{0},
         result_{static_cast< ::multiplayer::protocol::ELoginResult >(0)},
-        user_count_{0u} {}
+        user_count_{0u},
+        room_id_{0u} {}
 
 template <typename>
 PROTOBUF_CONSTEXPR SCLoginResult::SCLoginResult(::_pbi::ConstantInitialized)
@@ -95,11 +96,13 @@ const ::uint32_t
         0,
         0x081, // bitmap
         PROTOBUF_FIELD_OFFSET(::multiplayer::protocol::SCLoginResult, _impl_._has_bits_),
-        5, // hasbit index offset
+        6, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::multiplayer::protocol::SCLoginResult, _impl_.result_),
         PROTOBUF_FIELD_OFFSET(::multiplayer::protocol::SCLoginResult, _impl_.user_count_),
+        PROTOBUF_FIELD_OFFSET(::multiplayer::protocol::SCLoginResult, _impl_.room_id_),
         0,
         1,
+        2,
 };
 
 static const ::_pbi::MigrationSchema
@@ -114,21 +117,22 @@ static const ::_pb::Message* PROTOBUF_NONNULL const file_default_instances[] = {
 const char descriptor_table_protodef_login_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
     "\n\013login.proto\022\024multiplayer.protocol\"\033\n\007C"
-    "SLogin\022\020\n\010nickname\030\001 \001(\t\"W\n\rSCLoginResul"
+    "SLogin\022\020\n\010nickname\030\001 \001(\t\"h\n\rSCLoginResul"
     "t\0222\n\006result\030\001 \001(\0162\".multiplayer.protocol"
-    ".ELoginResult\022\022\n\nuser_count\030\002 \001(\r*\307\001\n\014EL"
-    "oginResult\022\025\n\021LOGIN_RESULT_NONE\020\000\022\030\n\024LOG"
-    "IN_RESULT_SUCCESS\020\001\022!\n\035LOGIN_RESULT_INVA"
-    "LID_NICKNAME\020\002\022#\n\037LOGIN_RESULT_DUPLICATE"
-    "_NICKNAME\020\003\022\"\n\036LOGIN_RESULT_ALREADY_LOGG"
-    "ED_IN\020\004\022\032\n\026LOGIN_RESULT_ROOM_FULL\020\005B\027\252\002\024"
-    "Multiplayer.Protocolb\006proto3"
+    ".ELoginResult\022\022\n\nuser_count\030\002 \001(\r\022\017\n\007roo"
+    "m_id\030\003 \001(\r*\307\001\n\014ELoginResult\022\025\n\021LOGIN_RES"
+    "ULT_NONE\020\000\022\030\n\024LOGIN_RESULT_SUCCESS\020\001\022!\n\035"
+    "LOGIN_RESULT_INVALID_NICKNAME\020\002\022#\n\037LOGIN"
+    "_RESULT_DUPLICATE_NICKNAME\020\003\022\"\n\036LOGIN_RE"
+    "SULT_ALREADY_LOGGED_IN\020\004\022\032\n\026LOGIN_RESULT"
+    "_ROOM_FULL\020\005B\027\252\002\024Multiplayer.Protocolb\006p"
+    "roto3"
 };
 static ::absl::once_flag descriptor_table_login_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_login_2eproto = {
     false,
     false,
-    388,
+    405,
     descriptor_table_protodef_login_2eproto,
     "login.proto",
     &descriptor_table_login_2eproto_once,
@@ -464,9 +468,9 @@ inline void SCLoginResult::SharedCtor(::_pb::Arena* PROTOBUF_NULLABLE arena) {
   ::memset(reinterpret_cast<char*>(&_impl_) +
                offsetof(Impl_, result_),
            0,
-           offsetof(Impl_, user_count_) -
+           offsetof(Impl_, room_id_) -
                offsetof(Impl_, result_) +
-               sizeof(Impl_::user_count_));
+               sizeof(Impl_::room_id_));
 }
 SCLoginResult::~SCLoginResult() {
   // @@protoc_insertion_point(destructor:multiplayer.protocol.SCLoginResult)
@@ -525,16 +529,16 @@ SCLoginResult::GetClassData() const {
   return SCLoginResult_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<1, 2, 0, 0, 2>
+const ::_pbi::TcParseTable<2, 3, 0, 0, 2>
 SCLoginResult::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_._has_bits_),
     0, // no _extensions_
-    2, 8,  // max_field_number, fast_idx_mask
+    3, 24,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294967292,  // skipmap
+    4294967288,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    2,  // num_field_entries
+    3,  // num_field_entries
     0,  // num_aux_entries
     offsetof(decltype(_table_), field_names),  // no aux_entries
     SCLoginResult_class_data_.base(),
@@ -544,14 +548,19 @@ SCLoginResult::_table_ = {
     ::_pbi::TcParser::GetTable<::multiplayer::protocol::SCLoginResult>(),  // to_prefetch
     #endif  // PROTOBUF_PREFETCH_PARSE_TABLE
   }, {{
-    // uint32 user_count = 2;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(SCLoginResult, _impl_.user_count_), 1>(),
-     {16, 1, 0,
-      PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.user_count_)}},
+    {::_pbi::TcParser::MiniParse, {}},
     // .multiplayer.protocol.ELoginResult result = 1;
     {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(SCLoginResult, _impl_.result_), 0>(),
      {8, 0, 0,
       PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.result_)}},
+    // uint32 user_count = 2;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(SCLoginResult, _impl_.user_count_), 1>(),
+     {16, 1, 0,
+      PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.user_count_)}},
+    // uint32 room_id = 3;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(SCLoginResult, _impl_.room_id_), 2>(),
+     {24, 2, 0,
+      PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.room_id_)}},
   }}, {{
     65535, 65535
   }}, {{
@@ -559,6 +568,8 @@ SCLoginResult::_table_ = {
     {PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.result_), _Internal::kHasBitsOffset + 0, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
     // uint32 user_count = 2;
     {PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.user_count_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    // uint32 room_id = 3;
+    {PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.room_id_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
   }},
   // no aux_entries
   {{
@@ -572,10 +583,10 @@ PROTOBUF_NOINLINE void SCLoginResult::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x00000003U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00000007U)) {
     ::memset(&_impl_.result_, 0, static_cast<::size_t>(
-        reinterpret_cast<char*>(&_impl_.user_count_) -
-        reinterpret_cast<char*>(&_impl_.result_)) + sizeof(_impl_.user_count_));
+        reinterpret_cast<char*>(&_impl_.room_id_) -
+        reinterpret_cast<char*>(&_impl_.result_)) + sizeof(_impl_.room_id_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::google::protobuf::UnknownFieldSet>();
@@ -618,6 +629,15 @@ PROTOBUF_NOINLINE void SCLoginResult::Clear() {
     }
   }
 
+  // uint32 room_id = 3;
+  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (this_._internal_room_id() != 0) {
+      target = stream->EnsureSpace(target);
+      target = ::_pbi::WireFormatLite::WriteUInt32ToArray(
+          3, this_._internal_room_id(), target);
+    }
+  }
+
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
     target =
         ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
@@ -643,7 +663,7 @@ PROTOBUF_NOINLINE void SCLoginResult::Clear() {
 
   ::_pbi::Prefetch5LinesFrom7Lines(&this_);
   cached_has_bits = this_._impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x00000003U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00000007U)) {
     // .multiplayer.protocol.ELoginResult result = 1;
     if (CheckHasBit(cached_has_bits, 0x00000001U)) {
       if (this_._internal_result() != 0) {
@@ -656,6 +676,13 @@ PROTOBUF_NOINLINE void SCLoginResult::Clear() {
       if (this_._internal_user_count() != 0) {
         total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
             this_._internal_user_count());
+      }
+    }
+    // uint32 room_id = 3;
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+      if (this_._internal_room_id() != 0) {
+        total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
+            this_._internal_room_id());
       }
     }
   }
@@ -677,7 +704,7 @@ void SCLoginResult::MergeImpl(::google::protobuf::MessageLite& to_msg,
   (void)cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x00000003U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x00000007U)) {
     if (CheckHasBit(cached_has_bits, 0x00000001U)) {
       if (from._internal_result() != 0) {
         _this->_impl_.result_ = from._impl_.result_;
@@ -686,6 +713,11 @@ void SCLoginResult::MergeImpl(::google::protobuf::MessageLite& to_msg,
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
       if (from._internal_user_count() != 0) {
         _this->_impl_.user_count_ = from._impl_.user_count_;
+      }
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+      if (from._internal_room_id() != 0) {
+        _this->_impl_.room_id_ = from._impl_.room_id_;
       }
     }
   }
@@ -707,8 +739,8 @@ void SCLoginResult::InternalSwap(SCLoginResult* PROTOBUF_RESTRICT PROTOBUF_NONNU
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::google::protobuf::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.user_count_)
-      + sizeof(SCLoginResult::_impl_.user_count_)
+      PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.room_id_)
+      + sizeof(SCLoginResult::_impl_.room_id_)
       - PROTOBUF_FIELD_OFFSET(SCLoginResult, _impl_.result_)>(
           reinterpret_cast<char*>(&_impl_.result_),
           reinterpret_cast<char*>(&other->_impl_.result_));

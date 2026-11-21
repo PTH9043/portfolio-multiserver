@@ -25,19 +25,19 @@ namespace Multiplayer.Protocol {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
             "Cgtsb2dpbi5wcm90bxIUbXVsdGlwbGF5ZXIucHJvdG9jb2wiGwoHQ1NMb2dp",
-            "bhIQCghuaWNrbmFtZRgBIAEoCSJXCg1TQ0xvZ2luUmVzdWx0EjIKBnJlc3Vs",
+            "bhIQCghuaWNrbmFtZRgBIAEoCSJoCg1TQ0xvZ2luUmVzdWx0EjIKBnJlc3Vs",
             "dBgBIAEoDjIiLm11bHRpcGxheWVyLnByb3RvY29sLkVMb2dpblJlc3VsdBIS",
-            "Cgp1c2VyX2NvdW50GAIgASgNKscBCgxFTG9naW5SZXN1bHQSFQoRTE9HSU5f",
-            "UkVTVUxUX05PTkUQABIYChRMT0dJTl9SRVNVTFRfU1VDQ0VTUxABEiEKHUxP",
-            "R0lOX1JFU1VMVF9JTlZBTElEX05JQ0tOQU1FEAISIwofTE9HSU5fUkVTVUxU",
-            "X0RVUExJQ0FURV9OSUNLTkFNRRADEiIKHkxPR0lOX1JFU1VMVF9BTFJFQURZ",
-            "X0xPR0dFRF9JThAEEhoKFkxPR0lOX1JFU1VMVF9ST09NX0ZVTEwQBUIXqgIU",
-            "TXVsdGlwbGF5ZXIuUHJvdG9jb2xiBnByb3RvMw=="));
+            "Cgp1c2VyX2NvdW50GAIgASgNEg8KB3Jvb21faWQYAyABKA0qxwEKDEVMb2dp",
+            "blJlc3VsdBIVChFMT0dJTl9SRVNVTFRfTk9ORRAAEhgKFExPR0lOX1JFU1VM",
+            "VF9TVUNDRVNTEAESIQodTE9HSU5fUkVTVUxUX0lOVkFMSURfTklDS05BTUUQ",
+            "AhIjCh9MT0dJTl9SRVNVTFRfRFVQTElDQVRFX05JQ0tOQU1FEAMSIgoeTE9H",
+            "SU5fUkVTVUxUX0FMUkVBRFlfTE9HR0VEX0lOEAQSGgoWTE9HSU5fUkVTVUxU",
+            "X1JPT01fRlVMTBAFQheqAhRNdWx0aXBsYXllci5Qcm90b2NvbGIGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Multiplayer.Protocol.ELoginResult), }, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Multiplayer.Protocol.CSLogin), global::Multiplayer.Protocol.CSLogin.Parser, new[]{ "Nickname" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Multiplayer.Protocol.SCLoginResult), global::Multiplayer.Protocol.SCLoginResult.Parser, new[]{ "Result", "UserCount" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Multiplayer.Protocol.SCLoginResult), global::Multiplayer.Protocol.SCLoginResult.Parser, new[]{ "Result", "UserCount", "RoomId" }, null, null, null, null)
           }));
     }
     #endregion
@@ -312,6 +312,7 @@ namespace Multiplayer.Protocol {
     public SCLoginResult(SCLoginResult other) : this() {
       result_ = other.result_;
       userCount_ = other.userCount_;
+      roomId_ = other.roomId_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -337,7 +338,7 @@ namespace Multiplayer.Protocol {
     public const int UserCountFieldNumber = 2;
     private uint userCount_;
     /// <summary>
-    /// 성공했을 때 기본 방의 현재 인원 수(자신 포함). 참가자 목록은 CSRoomUsers로 따로 요청한다.
+    /// 성공했을 때 입장한 방의 현재 인원 수(자신 포함). 참가자 목록은 CSRoomUsers로 따로 요청한다.
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -345,6 +346,21 @@ namespace Multiplayer.Protocol {
       get { return userCount_; }
       set {
         userCount_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "room_id" field.</summary>
+    public const int RoomIdFieldNumber = 3;
+    private uint roomId_;
+    /// <summary>
+    /// 성공했을 때 자동 입장한 기본 방 ID.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public uint RoomId {
+      get { return roomId_; }
+      set {
+        roomId_ = value;
       }
     }
 
@@ -365,6 +381,7 @@ namespace Multiplayer.Protocol {
       }
       if (Result != other.Result) return false;
       if (UserCount != other.UserCount) return false;
+      if (RoomId != other.RoomId) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -374,6 +391,7 @@ namespace Multiplayer.Protocol {
       int hash = 1;
       if (Result != global::Multiplayer.Protocol.ELoginResult.LoginResultNone) hash ^= Result.GetHashCode();
       if (UserCount != 0) hash ^= UserCount.GetHashCode();
+      if (RoomId != 0) hash ^= RoomId.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -400,6 +418,10 @@ namespace Multiplayer.Protocol {
         output.WriteRawTag(16);
         output.WriteUInt32(UserCount);
       }
+      if (RoomId != 0) {
+        output.WriteRawTag(24);
+        output.WriteUInt32(RoomId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -418,6 +440,10 @@ namespace Multiplayer.Protocol {
         output.WriteRawTag(16);
         output.WriteUInt32(UserCount);
       }
+      if (RoomId != 0) {
+        output.WriteRawTag(24);
+        output.WriteUInt32(RoomId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -433,6 +459,9 @@ namespace Multiplayer.Protocol {
       }
       if (UserCount != 0) {
         size += 1 + pb::CodedOutputStream.ComputeUInt32Size(UserCount);
+      }
+      if (RoomId != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt32Size(RoomId);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -451,6 +480,9 @@ namespace Multiplayer.Protocol {
       }
       if (other.UserCount != 0) {
         UserCount = other.UserCount;
+      }
+      if (other.RoomId != 0) {
+        RoomId = other.RoomId;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -479,6 +511,10 @@ namespace Multiplayer.Protocol {
             UserCount = input.ReadUInt32();
             break;
           }
+          case 24: {
+            RoomId = input.ReadUInt32();
+            break;
+          }
         }
       }
     #endif
@@ -504,6 +540,10 @@ namespace Multiplayer.Protocol {
           }
           case 16: {
             UserCount = input.ReadUInt32();
+            break;
+          }
+          case 24: {
+            RoomId = input.ReadUInt32();
             break;
           }
         }

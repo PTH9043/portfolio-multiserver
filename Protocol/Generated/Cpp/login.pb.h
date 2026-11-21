@@ -267,6 +267,7 @@ class SCLoginResult final : public ::google::protobuf::Message
   enum : int {
     kResultFieldNumber = 1,
     kUserCountFieldNumber = 2,
+    kRoomIdFieldNumber = 3,
   };
   // .multiplayer.protocol.ELoginResult result = 1;
   void clear_result() ;
@@ -288,11 +289,21 @@ class SCLoginResult final : public ::google::protobuf::Message
   void _internal_set_user_count(::uint32_t value);
 
   public:
+  // uint32 room_id = 3;
+  void clear_room_id() ;
+  ::uint32_t room_id() const;
+  void set_room_id(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_room_id() const;
+  void _internal_set_room_id(::uint32_t value);
+
+  public:
   // @@protoc_insertion_point(class_scope:multiplayer.protocol.SCLoginResult)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<1, 2,
+  static const ::google::protobuf::internal::TcParseTable<2, 3,
                                    0, 0,
                                    2>
       _table_;
@@ -316,6 +327,7 @@ class SCLoginResult final : public ::google::protobuf::Message
     ::google::protobuf::internal::CachedSize _cached_size_;
     int result_;
     ::uint32_t user_count_;
+    ::uint32_t room_id_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -652,6 +664,31 @@ inline ::uint32_t SCLoginResult::_internal_user_count() const {
 inline void SCLoginResult::_internal_set_user_count(::uint32_t value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.user_count_ = value;
+}
+
+// uint32 room_id = 3;
+inline void SCLoginResult::clear_room_id() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.room_id_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline ::uint32_t SCLoginResult::room_id() const {
+  // @@protoc_insertion_point(field_get:multiplayer.protocol.SCLoginResult.room_id)
+  return _internal_room_id();
+}
+inline void SCLoginResult::set_room_id(::uint32_t value) {
+  _internal_set_room_id(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  // @@protoc_insertion_point(field_set:multiplayer.protocol.SCLoginResult.room_id)
+}
+inline ::uint32_t SCLoginResult::_internal_room_id() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.room_id_;
+}
+inline void SCLoginResult::_internal_set_room_id(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.room_id_ = value;
 }
 
 #ifdef __GNUC__

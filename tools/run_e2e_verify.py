@@ -1,14 +1,18 @@
 #!/usr/bin/env python3
-"""MultiServer 원클릭 E2E · 다중 부하 · 경고 정책 · 1 MiB 백프레셔 재현 검증기.
+"""MultiServer 원클릭 E2E · 다중 방 병렬 부하 · 경고 정책 · 1 MiB 백프레셔 · 하트비트/유휴 타임아웃 재현 검증기.
 
 외부 Python 패키지 없이 표준 라이브러리만으로 ServerApp.exe를 임시 포트에 실행하고
-아래 6개 핵심 시나리오를 순서대로 검증합니다.
+아래 10개 핵심 시나리오를 순서대로 검증합니다.
   1. 로그인 정책 (한글·영문 성공 / 중복 거절 / 규칙 위반 거절 / 중복 로그인 거절)
   2. 양방향 채팅 + TCP 1바이트 분할 전송 + 2패킷 병합 전송 프레이밍 검증
   3. 25명 동시 접속 및 20명 단위 페이징(offset 0 / 20 / 25) + 퇴장 인원 갱신
   4. 경고·차단 정책 5종 (빈 채팅·201자 초과 유지 / 깨진 Protobuf·미정의 999·헤더 1021B 차단)
   5. 다중 동시 부하 (100명 로그인 + 30명 중도 이탈 + 100건 채팅 무손실 수신)
-  6. SlowReader 1 MiB 송신 큐 초과 백프레셔 차단 + 정상 종료(rc=0) 및 .cvtrace/.cvlog 확인
+  6. SlowReader 1 MiB 송신 큐 초과 백프레셔 강제 차단
+  7. 다중 방 목록(4채널)·이동·채팅 격리·전역 닉네임 유일성 + 4방 병렬 채팅 부하
+  8. 하트비트(CS_PING/SC_PONG) + 유휴 세션 타임아웃(--idle-timeout-ms=350) 강제 차단
+  9. ServerApp 정상 종료(rc=0, stderr=0B)
+ 10. .cvtrace/.cvlog 런타임 관측 무결성 및 경고 마커 전수 확인
 """
 
 from __future__ import annotations
@@ -29,11 +33,17 @@ from typing import Dict, List, Optional, Tuple
 CS_LOGIN = 1
 CS_CHAT = 2
 CS_ROOM_USERS = 3
+CS_ROOM_LIST = 4
+CS_JOIN_ROOM = 5
+CS_PING = 6
 
 SC_LOGIN_RESULT = 1
 SC_CHAT = 2
 SC_ROOM_USER_COUNT = 3
 SC_ROOM_USERS = 4
+SC_ROOM_LIST = 5
+SC_JOIN_ROOM_RESULT = 6
+SC_PONG = 7
 
 # ELoginResult (Protocol/Schema/login.proto)
 LOGIN_SUCCESS = 1
@@ -41,6 +51,13 @@ LOGIN_INVALID_NICKNAME = 2
 LOGIN_DUPLICATE_NICKNAME = 3
 LOGIN_ALREADY_LOGGED_IN = 4
 LOGIN_ROOM_FULL = 5
+
+# EJoinRoomResult (Protocol/Schema/room.proto)
+JOIN_ROOM_SUCCESS = 1
+JOIN_ROOM_NOT_FOUND = 2
+JOIN_ROOM_FULL = 3
+JOIN_ROOM_ALREADY_IN_ROOM = 4
+JOIN_ROOM_TRANSFER_IN_PROGRESS = 5
 
 PACKET_HEADER_SIZE = 4
 PACKET_MAX_BODY_SIZE = 1020
@@ -131,11 +148,24 @@ def cs_room_users(offset: int) -> bytes:
     return frame_packet(CS_ROOM_USERS, encode_uint32_field(1, offset))
 
 
-def parse_sc_login_result(body: bytes) -> Tuple[int, int]:
+def cs_room_list() -> bytes:
+    return frame_packet(CS_ROOM_LIST, b"")
+
+
+def cs_join_room(room_id: int) -> bytes:
+    return frame_packet(CS_JOIN_ROOM, encode_uint32_field(1, room_id))
+
+
+def cs_ping(client_time_ms: int) -> bytes:
+    return frame_packet(CS_PING, encode_uint32_field(1, client_time_ms))
+
+
+def parse_sc_login_result(body: bytes) -> Tuple[int, int, int]:
     f = decode_fields(body)
     result = int(f.get(1, [0])[-1])
     user_count = int(f.get(2, [0])[-1])
-    return result, user_count
+    room_id = int(f.get(3, [0])[-1])
+    return result, user_count, room_id
 
 
 def parse_sc_chat(body: bytes) -> Tuple[str, str]:
@@ -156,6 +186,32 @@ def parse_sc_room_users(body: bytes) -> Tuple[int, int, List[str]]:
     total = int(f.get(2, [0])[-1])
     nicks = [bytes(x).decode("utf-8") for x in f.get(3, [])]
     return offset, total, nicks
+
+
+def parse_sc_room_list(body: bytes) -> List[Tuple[int, str, int, int]]:
+    f = decode_fields(body)
+    rooms: List[Tuple[int, str, int, int]] = []
+    for raw_summary in f.get(1, []):
+        sf = decode_fields(bytes(raw_summary))
+        rid = int(sf.get(1, [0])[-1])
+        name = bytes(sf.get(2, [b""])[-1]).decode("utf-8")
+        ucnt = int(sf.get(3, [0])[-1])
+        maxu = int(sf.get(4, [0])[-1])
+        rooms.append((rid, name, ucnt, maxu))
+    return rooms
+
+
+def parse_sc_join_room_result(body: bytes) -> Tuple[int, int, int]:
+    f = decode_fields(body)
+    result = int(f.get(1, [0])[-1])
+    room_id = int(f.get(2, [0])[-1])
+    user_count = int(f.get(3, [0])[-1])
+    return result, room_id, user_count
+
+
+def parse_sc_pong(body: bytes) -> int:
+    f = decode_fields(body)
+    return int(f.get(1, [0])[-1])
 
 
 # ---- 소켓 헬퍼 ----
@@ -251,31 +307,31 @@ def run_scenarios(port: int, load_clients: int, chat_count: int) -> Dict[str, ob
     # 1. 로그인 정책 (성공 / 중복 / 규칙 위반 / 중복 로그인)
     c1 = TestClient(port)
     c1.send_raw(cs_login("테스터01"))
-    res, cnt = parse_sc_login_result(c1.recv_expect(SC_LOGIN_RESULT))
-    assert res == LOGIN_SUCCESS and cnt == 1, f"Login failed: {res}, {cnt}"
+    res, cnt, rid = parse_sc_login_result(c1.recv_expect(SC_LOGIN_RESULT))
+    assert res == LOGIN_SUCCESS and cnt == 1 and rid == 1, f"Login failed: {res}, {cnt}, {rid}"
 
     c_dup = TestClient(port)
     c_dup.send_raw(cs_login("테스터01"))
-    res_dup, _ = parse_sc_login_result(c_dup.recv_expect(SC_LOGIN_RESULT))
+    res_dup, _, _ = parse_sc_login_result(c_dup.recv_expect(SC_LOGIN_RESULT))
     assert res_dup == LOGIN_DUPLICATE_NICKNAME, f"Expected duplicate: {res_dup}"
     c_dup.close()
 
     c_bad = TestClient(port)
     c_bad.send_raw(cs_login("Bad!"))
-    res_bad, _ = parse_sc_login_result(c_bad.recv_expect(SC_LOGIN_RESULT))
+    res_bad, _, _ = parse_sc_login_result(c_bad.recv_expect(SC_LOGIN_RESULT))
     assert res_bad == LOGIN_INVALID_NICKNAME, f"Expected invalid nick: {res_bad}"
     c_bad.close()
 
     c1.send_raw(cs_login("테스터99"))
-    res_again, _ = parse_sc_login_result(c1.recv_expect(SC_LOGIN_RESULT))
+    res_again, _, _ = parse_sc_login_result(c1.recv_expect(SC_LOGIN_RESULT))
     assert res_again == LOGIN_ALREADY_LOGGED_IN, f"Expected already logged in: {res_again}"
     print("[PASS] 1. 로그인 정책 (한글 성공 / 중복·규칙위반·재로그인 거절)")
 
     # 2. 양방향 채팅 + 1바이트 분할 전송 + 2패킷 병합 전송
     c2 = TestClient(port)
     c2.send_raw(cs_login("Player02"))
-    res2, cnt2 = parse_sc_login_result(c2.recv_expect(SC_LOGIN_RESULT))
-    assert res2 == LOGIN_SUCCESS and cnt2 == 2, f"c2 login failed: {res2}, {cnt2}"
+    res2, cnt2, rid2 = parse_sc_login_result(c2.recv_expect(SC_LOGIN_RESULT))
+    assert res2 == LOGIN_SUCCESS and cnt2 == 2 and rid2 == 1, f"c2 login failed: {res2}, {cnt2}, {rid2}"
 
     # 1바이트씩 분할 전송
     split_pkt = cs_chat("분할전송테스트")
@@ -301,7 +357,7 @@ def run_scenarios(port: int, load_clients: int, chat_count: int) -> Dict[str, ob
     for i in range(3, 26):
         tc = TestClient(port)
         tc.send_raw(cs_login(f"유저{i:02d}"))
-        r, _ = parse_sc_login_result(tc.recv_expect(SC_LOGIN_RESULT))
+        r, _, _ = parse_sc_login_result(tc.recv_expect(SC_LOGIN_RESULT))
         assert r == LOGIN_SUCCESS, f"Extra user {i} failed: {r}"
         extra.append(tc)
 
@@ -369,7 +425,7 @@ def run_scenarios(port: int, load_clients: int, chat_count: int) -> Dict[str, ob
     def connect_and_login(idx: int) -> TestClient:
         cl = TestClient(port, timeout=10.0)
         cl.send_raw(cs_login(f"Load{idx:04d}"))
-        r, _ = parse_sc_login_result(cl.recv_expect(SC_LOGIN_RESULT, timeout=10.0))
+        r, _, _ = parse_sc_login_result(cl.recv_expect(SC_LOGIN_RESULT, timeout=10.0))
         if r != LOGIN_SUCCESS:
             raise AssertionError(f"Load user {idx} login failed: {r}")
         return cl
@@ -434,12 +490,12 @@ def run_scenarios(port: int, load_clients: int, chat_count: int) -> Dict[str, ob
     slow = TestClient(port)
     slow.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
     slow.send_raw(cs_login("SlowReader"))
-    r_slow, _ = parse_sc_login_result(slow.recv_expect(SC_LOGIN_RESULT))
+    r_slow, _, _ = parse_sc_login_result(slow.recv_expect(SC_LOGIN_RESULT))
     assert r_slow == LOGIN_SUCCESS
 
     flooder = TestClient(port)
     flooder.send_raw(cs_login("FloodSender"))
-    r_fl, _ = parse_sc_login_result(flooder.recv_expect(SC_LOGIN_RESULT))
+    r_fl, _, _ = parse_sc_login_result(flooder.recv_expect(SC_LOGIN_RESULT))
     assert r_fl == LOGIN_SUCCESS
 
     # SlowReader는 recv하지 않은 채 FloodSender만 자신의 에코를 소비하면서 200한글자(600B+) 채팅 송신
@@ -489,9 +545,217 @@ def run_scenarios(port: int, load_clients: int, chat_count: int) -> Dict[str, ob
     assert slow_kicked, "SlowReader was not removed from room after exceeding 1 MiB send queue"
     slow.close()
     flooder.close()
+    time.sleep(0.1)
     print("[PASS] 6. SlowReader 1 MiB 송신 큐 초과 백프레셔 강제 차단")
 
+    # 7. 다중 방(4채널) 목록 · 이동 · 채팅 격리 · 전역 닉네임 유일성 + 4방 병렬 채팅 부하
+    mr1 = TestClient(port)
+    mr1.send_raw(cs_login("방장01"))
+    r_mr1, _, rid_mr1 = parse_sc_login_result(mr1.recv_expect(SC_LOGIN_RESULT))
+    assert r_mr1 == LOGIN_SUCCESS and rid_mr1 == 1
+
+    mr1.send_raw(cs_room_list())
+    rooms = parse_sc_room_list(mr1.recv_expect(SC_ROOM_LIST))
+    assert [(r[0], r[1], r[3]) for r in rooms] == [
+        (1, "로비", 1000),
+        (2, "자유", 1000),
+        (3, "전략", 1000),
+        (4, "거래", 1000),
+    ], f"Unexpected room list: {rooms}"
+
+    # 같은 방 이동 요청 -> ALREADY_IN_ROOM / 없는 방 -> NOT_FOUND
+    mr1.send_raw(cs_join_room(1))
+    jr_same, _, _ = parse_sc_join_room_result(mr1.recv_expect(SC_JOIN_ROOM_RESULT))
+    assert jr_same == JOIN_ROOM_ALREADY_IN_ROOM, f"Expected ALREADY_IN_ROOM: {jr_same}"
+
+    mr1.send_raw(cs_join_room(999))
+    jr_nf, _, _ = parse_sc_join_room_result(mr1.recv_expect(SC_JOIN_ROOM_RESULT))
+    assert jr_nf == JOIN_ROOM_NOT_FOUND, f"Expected NOT_FOUND: {jr_nf}"
+
+    # 방 #2 이동 후 방 #1 유저와 채팅 격리 + 전역 닉네임 중복 차단 검증
+    mr2 = TestClient(port)
+    mr2.send_raw(cs_login("방장02"))
+    r_mr2, _, _ = parse_sc_login_result(mr2.recv_expect(SC_LOGIN_RESULT))
+    assert r_mr2 == LOGIN_SUCCESS
+
+    mr1.send_raw(cs_join_room(2))
+    jr_ok, jr_rid, jr_cnt = parse_sc_join_room_result(mr1.recv_expect(SC_JOIN_ROOM_RESULT))
+    assert jr_ok == JOIN_ROOM_SUCCESS and jr_rid == 2 and jr_cnt == 1, f"Join room 2 failed: {jr_ok}/{jr_rid}/{jr_cnt}"
+
+    # 방 #2에 있는 "방장01" 닉네임으로 방 #1 재로그인 시도 -> 서버 전역 중복 차단
+    mr_dup = TestClient(port)
+    mr_dup.send_raw(cs_login("방장01"))
+    r_gdup, _, _ = parse_sc_login_result(mr_dup.recv_expect(SC_LOGIN_RESULT))
+    assert r_gdup == LOGIN_DUPLICATE_NICKNAME, f"Global nickname check failed: {r_gdup}"
+    mr_dup.close()
+
+    # 채팅 격리: mr1(방 #2) 발송 -> mr1만 수신, mr2(방 #1) 발송 -> mr2만 수신
+    mr1.send_raw(cs_chat("ONLY_ROOM_2"))
+    assert parse_sc_chat(mr1.recv_expect(SC_CHAT)) == ("방장01", "ONLY_ROOM_2")
+    mr2.send_raw(cs_chat("ONLY_ROOM_1"))
+    assert parse_sc_chat(mr2.recv_expect(SC_CHAT)) == ("방장02", "ONLY_ROOM_1")
+    # 방 #2에 방 #1 메시지가 오지 않았는지 짧게 확인
+    mr1.send_raw(cs_ping(424242))
+    assert parse_sc_pong(mr1.recv_expect(SC_PONG)) == 424242
+
+    mr1.close()
+    mr2.close()
+    # 퇴장 직후 전역 닉네임 해제 확인
+    reused = False
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        probe = TestClient(port)
+        probe.send_raw(cs_login("방장01"))
+        r_p, _, _ = parse_sc_login_result(probe.recv_expect(SC_LOGIN_RESULT))
+        probe.close()
+        if r_p == LOGIN_SUCCESS:
+            reused = True
+            break
+        time.sleep(0.05)
+    assert reused, "Nickname was not released after room-2 disconnect"
+
+    # 4방 병렬 채팅 부하: 80명 접속 -> 4개 방에 20명씩 분산 이동 -> 각 방 동시 40건씩 브로드캐스트
+    per_room = 20
+    msgs_per_room = 40
+    total_multi_clients = per_room * 4
+
+    def join_room_worker(idx: int) -> Tuple[int, TestClient]:
+        target_room = (idx // per_room) + 1
+        cl = TestClient(port, timeout=10.0)
+        cl.send_raw(cs_login(f"MR{idx:03d}"))
+        r_l, _, _ = parse_sc_login_result(cl.recv_expect(SC_LOGIN_RESULT, timeout=10.0))
+        if r_l != LOGIN_SUCCESS:
+            raise AssertionError(f"MR{idx:03d} login failed: {r_l}")
+        if target_room != 1:
+            cl.send_raw(cs_join_room(target_room))
+            jr, jrid, _ = parse_sc_join_room_result(cl.recv_expect(SC_JOIN_ROOM_RESULT, timeout=10.0))
+            if jr != JOIN_ROOM_SUCCESS or jrid != target_room:
+                raise AssertionError(f"MR{idx:03d} join room {target_room} failed: {jr}/{jrid}")
+        return target_room, cl
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        grouped_raw = list(pool.map(join_room_worker, range(total_multi_clients)))
+
+    room_groups: Dict[int, List[TestClient]] = {1: [], 2: [], 3: [], 4: []}
+    for rid_g, cl_g in grouped_raw:
+        room_groups[rid_g].append(cl_g)
+
+    t_mr0 = time.perf_counter()
+
+    def send_room_burst(rid_s: int) -> None:
+        sender_s = room_groups[rid_s][0]
+        for seq in range(msgs_per_room):
+            sender_s.send_raw(cs_chat(f"R{rid_s}_M{seq:03d}"))
+
+    def recv_room_burst(item: Tuple[int, TestClient]) -> int:
+        rid_r, cl_r = item
+        prefix = f"R{rid_r}_M"
+        got_cnt = 0
+        while got_cnt < msgs_per_room:
+            _, txt_r = parse_sc_chat(cl_r.recv_expect(SC_CHAT, timeout=10.0))
+            if not txt_r.startswith(prefix):
+                raise AssertionError(f"Cross-room leak in room {rid_r}: {txt_r}")
+            got_cnt += 1
+        return got_cnt
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as pool:
+        send_futs = [pool.submit(send_room_burst, r_id) for r_id in (1, 2, 3, 4)]
+        recv_counts = list(pool.map(recv_room_burst, grouped_raw))
+        for fut in send_futs:
+            fut.result()
+
+    t_mr = (time.perf_counter() - t_mr0) * 1000.0
+    mr_delivered = sum(recv_counts)
+    assert mr_delivered == total_multi_clients * msgs_per_room
+    for _, cl_g in grouped_raw:
+        cl_g.close()
+    time.sleep(0.1)
+
+    stats["multi_room_clients"] = total_multi_clients
+    stats["multi_room_delivered"] = mr_delivered
+    stats["multi_room_ms"] = round(t_mr, 2)
+    stats["multi_room_kmsg_s"] = round(mr_delivered / max(t_mr, 0.001), 2)
+    print(
+        f"[PASS] 7. 다중 방 4채널 목록·이동·격리·전역 닉네임 + 4방 병렬 채팅 "
+        f"(80명/4방 × {msgs_per_room}건 = {mr_delivered:,}건 무손실·교차오염 0, "
+        f"{t_mr:.1f} ms, {stats['multi_room_kmsg_s']:.2f} Kmsg/s)"
+    )
+
     return stats
+
+
+def verify_heartbeat_and_idle_timeout(exe_path: Path, main_port: int, trace_mode: str) -> Dict[str, object]:
+    # 8a. 메인 서버에서 로그인 전/후 CS_PING -> SC_PONG 왕복 확인
+    p_client = TestClient(main_port)
+    p_client.send_raw(cs_ping(123456789))
+    assert parse_sc_pong(p_client.recv_expect(SC_PONG)) == 123456789
+    p_client.send_raw(cs_login("PingTester"))
+    r_p, _, _ = parse_sc_login_result(p_client.recv_expect(SC_LOGIN_RESULT))
+    assert r_p == LOGIN_SUCCESS
+    p_client.send_raw(cs_ping(987654321))
+    assert parse_sc_pong(p_client.recv_expect(SC_PONG)) == 987654321
+    p_client.close()
+
+    # 8b. 별도 임시 포트에 --idle-timeout-ms=350 서버 기동 -> 침묵 세션 차단 vs 하트비트 세션 생존
+    idle_port = find_free_port()
+    idle_cmd = [
+        str(exe_path),
+        "2",
+        str(idle_port),
+        f"--trace={trace_mode}",
+        "--idle-timeout-ms=350",
+    ]
+    idle_proc = subprocess.Popen(
+        idle_cmd,
+        cwd=str(exe_path.parent),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        wait_port_ready(idle_port, timeout=5.0)
+
+        silent = TestClient(idle_port, timeout=3.0)
+        alive = TestClient(idle_port, timeout=3.0)
+        alive.send_raw(cs_login("HeartBeat"))
+        r_a, _, _ = parse_sc_login_result(alive.recv_expect(SC_LOGIN_RESULT))
+        assert r_a == LOGIN_SUCCESS
+
+        # 하트비트 세션은 120ms 간격으로 6회(720ms) Ping을 보내 유휴 타임아웃(350ms)을 넘겨 생존
+        for seq in range(1, 7):
+            time.sleep(0.12)
+            alive.send_raw(cs_ping(seq * 100))
+            assert parse_sc_pong(alive.recv_expect(SC_PONG, timeout=2.0)) == seq * 100
+
+        # 침묵 세션은 이미 서버가 강제 종료했어야 한다.
+        assert silent.expect_closed(timeout=2.0), "Silent client was not closed by idle timeout"
+        silent.close()
+        alive.close()
+
+        assert idle_proc.stdin is not None
+        idle_proc.stdin.write(b"\n")
+        idle_proc.stdin.flush()
+        _, idle_stderr = idle_proc.communicate(timeout=10.0)
+        assert idle_proc.returncode == 0, f"Idle server exited with {idle_proc.returncode}"
+        assert not idle_stderr.strip(), f"Idle server stderr: {idle_stderr.decode('utf-8', errors='replace')}"
+
+        # trace 활성 시 .cvlog에 idle timeout 마커 확인
+        idle_marker_seen = False
+        if trace_mode != "off":
+            for trace_dir in (exe_path.parent / "ChangeViewerTrace", exe_path.parent.parent / "ChangeViewerTrace"):
+                if trace_dir.is_dir():
+                    for log_f in sorted(trace_dir.glob(f"*-{idle_proc.pid}.cvlog")):
+                        txt = log_f.read_text(encoding="utf-8")
+                        if "idle timeout" in txt:
+                            idle_marker_seen = True
+            assert idle_marker_seen, f"Missing 'idle timeout' marker in idle server .cvlog (pid={idle_proc.pid})"
+
+        print("[PASS] 8. 하트비트(CS_PING/SC_PONG) · 유휴 세션 타임아웃(350ms) 강제 차단 및 .cvlog 확인")
+        return {"idle_timeout_verified": True, "idle_log_marker": idle_marker_seen}
+    finally:
+        if idle_proc.poll() is None:
+            idle_proc.kill()
+            idle_proc.wait(timeout=5.0)
 
 
 def verify_trace_files(exe_path: Path, pid: int, trace_mode: str) -> Dict[str, object]:
@@ -534,7 +798,7 @@ def verify_trace_files(exe_path: Path, pid: int, trace_mode: str) -> Dict[str, o
     info["cvtrace_bytes"] = len(raw)
     info["cvlog_records"] = len(log_lines)
     print(
-        f"[PASS] 8. 런타임 관측 무결성 (.cvtrace {len(raw):,} B / "
+        f"[PASS] 10. 런타임 관측 무결성 (.cvtrace {len(raw):,} B / "
         f".cvlog {len(log_lines)}건 / 경고 마커 6종 전수 확인)"
     )
     return info
@@ -578,6 +842,7 @@ def main() -> int:
     try:
         wait_port_ready(port, timeout=5.0)
         stats = run_scenarios(port, args.load_clients, args.chat_count)
+        hb_stats = verify_heartbeat_and_idle_timeout(exe_path, port, args.trace)
 
         # Enter 입력으로 정상 종료 요청
         assert proc.stdin is not None
@@ -589,11 +854,11 @@ def main() -> int:
             f"STDERR:\n{stderr_b.decode('utf-8', errors='replace')}"
         )
         assert not stderr_b.strip(), f"Unexpected stderr: {stderr_b.decode('utf-8', errors='replace')}"
-        print(f"[PASS] 7. ServerApp 정상 종료 (rc=0, stderr=0B)")
+        print(f"[PASS] 9. ServerApp 정상 종료 (rc=0, stderr=0B)")
 
         trace_info = verify_trace_files(exe_path, proc.pid, args.trace)
         print("=== ALL CHECKS PASSED ===")
-        print(json.dumps({**stats, **trace_info}, ensure_ascii=False))
+        print(json.dumps({**stats, **hb_stats, **trace_info}, ensure_ascii=False))
         return 0
     finally:
         if proc.poll() is None:

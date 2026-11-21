@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MultiServer C++20 스트레스 테스트 &amp; 최적화 기술 리포트 (2026-11-22)</title>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --muted: #475569;
+    --border: #e2e8f0; --accent: #0f766e; --accent2: #2563eb; --danger: #dc2626; --soft: #f0fdfa;
+  }
+  body.dark {
+    --bg: #0b1120; --card: #111827; --ink: #f1f5f9; --muted: #94a3b8;
+    --border: #1f2937; --accent: #2dd4bf; --accent2: #60a5fa; --danger: #f87171; --soft: #134e4a33;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--ink); line-height: 1.6; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 28px 20px 64px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; border-bottom: 2px solid var(--accent); padding-bottom: 18px; margin-bottom: 24px; }
+  h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.3px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .btn { background: var(--card); color: var(--ink); border: 1px solid var(--border); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .btn:hover { border-color: var(--accent); }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+  .kpi .label { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .kpi .val { font-size: 24px; font-weight: 800; color: var(--accent); margin: 4px 0; }
+  .kpi .sub { font-size: 12px; color: var(--muted); }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; }
+  h2 { margin: 0 0 12px; font-size: 18px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 8px; }
+  th, td { border: 1px solid var(--border); padding: 9px 11px; text-align: left; }
+  th { background: #0f172a; color: #f8fafc; font-weight: 700; }
+  body.dark th { background: #1e293b; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--soft); color: var(--accent); }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 18px; margin-top: 14px; }
+  .chart-box { border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--bg); }
+  .chart-title { font-size: 13.5px; font-weight: 700; margin-bottom: 8px; }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tab { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--ink); cursor: pointer; font-size: 13px; font-weight: 600; }
+  .tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .callout { background: var(--soft); border-left: 4px solid var(--accent); padding: 12px 16px; border-radius: 8px; font-size: 13.5px; margin: 10px 0; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  svg text { fill: var(--ink); font-family: 'Malgun Gothic', sans-serif; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>MultiServer C++20 게임 서버 스트레스 테스트 &amp; 최적화 리포트</h1>
+      <div class="meta">측정일: 2026-11-22 02:53:35 · MSVC v145 C++20 Release|x64 (Isolated %TEMP%) · 워커 4스레드 · Windows 10 (10.0.26100) (8C/16T, 31.93 GB RAM)</div>
+    </div>
+    <button class="btn" onclick="document.body.classList.toggle('dark')">다크 / 라이트 전환</button>
+  </header>
+
+  <div class="kpi-grid">
+    <div class="kpi"><div class="label">1,000명 동시 로그인 단축</div><div class="val">43.8x</div><div class="sub">16.93s → 0.39s (p99 30.7ms)</div></div>
+    <div class="kpi"><div class="label">200,000건 브로드캐스트 처리량</div><div class="val">574,878 pkt/s</div><div class="sub">Before 23,849 pkt/s 대비 24.10x 향상 · 손실 0</div></div>
+    <div class="kpi"><div class="label">채팅 p99 꼬리 지연 절감</div><div class="val">-96.5%</div><div class="sub">8,312.8ms → 293.4ms</div></div>
+    <div class="kpi"><div class="label">혼돈·악성·백프레셔 방어율</div><div class="val">100%</div><div class="sub">유령 0 · 닉네임 누수 0 · 정상 50명 전원 생존 · 종료 62ms</div></div>
+  </div>
+
+  <section>
+    <h2>1. Before vs After 동일 조건 비교 (단일 방 1,000명 · 200,000건 브로드캐스트)</h2>
+    <div class="callout">동일한 1,000명 동시 로그인 + 200건×1,000명(200,000 SC_CHAT) + 동시 이탈 종료 조건에서, <b>불변 공유 버퍼(SHPTR&lt;const BUFFER&gt;) + Scatter-Gather 배치 송신 + 25ms 인원 Coalescing + 0 RTTI(TypeID+static_cast)</b> 적용 전후를 1:1 대조한 결과입니다.</div>
+    <table>
+      <thead><tr><th>측정 항목</th><th>Before (Phase 1 Baseline)</th><th>After (Phase 1B 현재)</th><th>개선 결과</th></tr></thead>
+      <tbody>
+        <tr><td>1,000명 동시 로그인 시간</td><td class="num">16.934 s</td><td class="num">0.386 s</td><td><span class="badge">43.8x 단축</span></td></tr>
+        <tr><td>로그인 p50 / p95 / p99</td><td class="num">902.7 / 2941.5 / 3199.4 ms</td><td class="num">19.8 / 28.8 / 30.7 ms</td><td><span class="badge">p99 -99.0%</span></td></tr>
+        <tr><td>200,000건 채팅 소요 / 손실</td><td class="num">8.386 s / 0건</td><td class="num">0.348 s / 0건</td><td><span class="badge">24.10x 단축</span></td></tr>
+        <tr><td>브로드캐스트 처리량</td><td class="num">23,849 pkt/s</td><td class="num">574,878 pkt/s</td><td><span class="badge">24.10x 향상</span></td></tr>
+        <tr><td>채팅 종단 p50 / p99 / max</td><td class="num">4845.7 / 8312.8 / 8369.4 ms</td><td class="num">164.6 / 293.4 / 304.2 ms</td><td><span class="badge">p99 -96.5%</span></td></tr>
+        <tr><td>서버 누적 CPU 시간</td><td class="num">53.47 s</td><td class="num">1.41 s (User 0.59s + Sys 0.81s)</td><td><span class="badge">-97.4% 절감</span></td></tr>
+        <tr><td>피크 메모리 (RSS)</td><td class="num">40.20 MB</td><td class="num">25.82 MB (종료 직전 22.82 MB)</td><td><span class="badge">안정 유지</span></td></tr>
+        <tr><td>1,000명 동시 이탈 후 종료</td><td class="num">15,000+ ms (타임아웃)</td><td class="num">62.5 ms (rc=0, stderr=0B)</td><td><span class="badge">완전 해소</span></td></tr>
+      </tbody>
+    </table>
+    <div class="chart-grid">
+      <div class="chart-box"><div class="chart-title">Before vs After 소요 시간 비교 (초 · 낮을수록 우수)</div><svg id="chartBeforeAfter" viewBox="0 0 460 220" width="100%"></svg></div>
+      <div class="chart-box"><div class="chart-title">시나리오별 지연 분포 p50 / p95 / p99 (ms)</div><svg id="chartLatency" viewBox="0 0 460 220" width="100%"></svg></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 5대 공격적 스트레스 테스트 시나리오(S1~S5) 전체 요약</h2>
+    <table>
+      <thead><tr><th>시나리오</th><th>실험 설계</th><th>실측 수치</th><th>판정 및 정합성</th></tr></thead>
+      <tbody>
+        <tr><td><b>S1. 단일 방 1,000명 포화</b></td><td>1,000명 로그인 + 200,000 SC_CHAT + 일괄 단절</td><td>574,878 pkt/s · p50 164.6ms · p99 293.4ms</td><td><span class="badge">PASS</span> 손실 0 · 종료 62.5ms</td></tr>
+        <tr><td><b>S2. 4채널 1,000명 병렬</b></td><td>4방×250명 분산 후 4개 독립 Strand 동시 100,000 SC_CHAT</td><td>520,291 pkt/s · 채팅 p99 151.0ms · 이동 p99 15.3ms</td><td><span class="badge">PASS</span> 교차 방 오염 0 · 종료 47.4ms</td></tr>
+        <tr><td><b>S3. 고속 방 이동 Chaos</b></td><td>200명 연속 8회 랜덤 이동 + 60명(30%) 이동 직후 강제 단절</td><td>성공 이동 1,371회 (1.56s) · p50 139.4ms · p99 682.5ms</td><td><span class="badge">PASS</span> 유령 0 · 닉네임 재사용 60/60</td></tr>
+        <tr><td><b>S4. 악성·백프레셔·유휴</b></td><td>정상 50명 유지 중 악성 100건 + SlowReader 5명 + 침묵 20명</td><td>악성차단 60/60 · 거절 40/40 · Slow 5/5 · 유휴 20/20</td><td><span class="badge">PASS</span> 정상 50/50 생존 (최소 Pong 5회)</td></tr>
+        <tr><td><b>S5. 자원 시계열 프로파일</b></td><td>전 시나리오 150ms 간격 psutil 프로파일링 (54 표본)</td><td>피크 RSS 29.69 MB · 최대 Handles 1121 · 최대 Threads 13</td><td><span class="badge">PASS</span> 전 시나리오 rc=0 · stderr=0B</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. 시계열 메모리(RSS) · 핸들 수 인터랙티브 프로파일 (S5)</h2>
+    <div class="tabs">
+      <button class="tab active" onclick="renderSeries('s1_series', this)">S1: 단일방 1,000명</button>
+      <button class="tab" onclick="renderSeries('s2_series', this)">S2: 4방 병렬 1,000명</button>
+      <button class="tab" onclick="renderSeries('s3_series', this)">S3: 방 이동 Chaos</button>
+      <button class="tab" onclick="renderSeries('s4_series', this)">S4: 악성·백프레셔·유휴</button>
+    </div>
+    <div class="chart-box">
+      <div class="chart-title" id="seriesTitle">S1 시계열 프로파일 — RSS(MB, 청록) &amp; Handles(파랑)</div>
+      <svg id="chartSeries" viewBox="0 0 980 250" width="100%"></svg>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. 보존된 원본 로그 및 연계 아카이브 근거 (총 39.872 MB)</h2>
+    <p class="meta">실험의 재현성과 투명성을 위해 공격 테스트에서 생성된 모든 이진 트레이스(.cvtrace), JSONL 로그(.cvlog), 시계열 CSV, 집계 JSON을 삭제하지 않고 그대로 보존했습니다. 연계 문서: <a href="../로그_설계_자료/대화_아카이브_20261122.pdf">전체 개발 대화 아카이브 PDF</a> · <a href="../로그_설계_자료/로그_설계_기록.pdf">누적 기술 기록 PDF (498쪽)</a> · <a href="MultiServer_StressTest_Report_20261122.pdf">인쇄용 리포트 PDF</a></p>
+    <table>
+      <thead><tr><th>파일명 (logs/stress_20261122/)</th><th>크기 (MB)</th><th>크기 (Bytes)</th></tr></thead>
+      <tbody>
+        <tr><td><a href='../logs/stress_20261122/resource_samples.csv'>resource_samples.csv</a></td><td class='num'>0.004 MB</td><td class='num'>4,466 B</td></tr><tr><td><a href='../logs/stress_20261122/s1_single1000.cvlog'>s1_single1000.cvlog</a></td><td class='num'>0.000 MB</td><td class='num'>142 B</td></tr><tr><td><a href='../logs/stress_20261122/s2_multi4x250.cvlog'>s2_multi4x250.cvlog</a></td><td class='num'>0.000 MB</td><td class='num'>142 B</td></tr><tr><td><a href='../logs/stress_20261122/s3_chaos_transfer.cvlog'>s3_chaos_transfer.cvlog</a></td><td class='num'>0.000 MB</td><td class='num'>141 B</td></tr><tr><td><a href='../logs/stress_20261122/s4_security_backpressure.cvlog'>s4_security_backpressure.cvlog</a></td><td class='num'>0.015 MB</td><td class='num'>15,592 B</td></tr><tr><td><a href='../logs/stress_20261122/s4_security_backpressure.cvtrace'>s4_security_backpressure.cvtrace</a></td><td class='num'>39.846 MB</td><td class='num'>41,782,080 B</td></tr><tr><td><a href='../logs/stress_20261122/stress_summary.json'>stress_summary.json</a></td><td class='num'>0.006 MB</td><td class='num'>5,906 B</td></tr>
+        <tr><td><b>합계</b></td><td class="num"><b>39.872 MB</b></td><td class="num"><b>41,808,469 B</b></td></tr>
+      </tbody>
+    </table>
+  </section>
+</div>
+<script>
+const DATA = {"baseline": {"login_total_s": 16.934, "login_p50_ms": 902.71, "login_p95_ms": 2941.49, "login_p99_ms": 3199.36, "chat_total_s": 8.386, "chat_pps": 23849.0, "chat_p50_ms": 4845.71, "chat_p95_ms": 8144.64, "chat_p99_ms": 8312.84, "chat_max_ms": 8369.43, "cpu_total_s": 53.47, "chat_cpu_delta_s": 21.08, "peak_rss_mb": 40.2, "shutdown_label": "15,000+ ms (타임아웃)"}, "summary": {"environment": {"timestamp": "2026-11-22 02:53:35", "os": "Windows 10 (10.0.26100)", "cpu_count_logical": 16, "cpu_count_physical": 8, "ram_total_gb": 31.93, "git_base_commit": "4651c12", "working_tree": "Phase 1A + Phase 1B (uncommitted on top of 4651c12)", "build_config": "MSVC v145 C++20 Release|x64 (Isolated %TEMP%)", "server_workers": 4}, "scenarios": {"S1": {"scenario": "S1_SingleRoom_1000", "harness": "8-process multiprocessing asyncio (64KB chunked)", "clients": 1000, "login_total_s": 0.3863, "login_latency_ms": {"count": 1000, "min": 2.898, "p50": 19.802, "p95": 28.791, "p99": 30.661, "max": 40.661, "mean": 20.327}, "rss_after_login_mb": 15.0, "cpu_after_login_s": 0.0625, "chat_messages_sent": 200, "chat_packets_delivered": 200000, "chat_loss": 0, "chat_total_s": 0.3479, "chat_packets_per_sec": 574877.8, "chat_latency_ms": {"count": 51200, "min": 7.644, "p50": 164.562, "p95": 282.313, "p99": 293.361, "max": 304.225, "mean": 164.293}, "chat_cpu_delta_s": 0.8907, "shutdown_ms": 62.46, "rc": 0, "stderr_bytes": 0, "resources": {"sample_count": 13, "peak_rss_mb": 25.82, "end_rss_mb": 22.816, "peak_private_mb": 19.254, "end_private_mb": 16.297, "peak_handles": 1121, "end_handles": 121, "peak_threads": 12, "cpu_user_s": 0.5938, "cpu_sys_s": 0.8125, "cpu_total_s": 1.4062}, "saved_logs": ["s1_single1000.cvlog"], "single_process_gil_reference": {"chat_total_s": 20.9126, "chat_packets_per_sec": 9563.6, "server_cpu_delta_s": 3.0156, "note": "1차 단일 Python 스레드 측정 시 서버 CPU는 3.02s에 불과했으나 클라이언트 GIL 포화로 20.91s 기록 → 8프로세스 하네스로 교정"}}, "S2": {"scenario": "S2_MultiRoom_4x250", "harness": "8-process multiprocessing asyncio (64KB chunked)", "clients": 1000, "rooms": 4, "per_room": 250, "distribute_total_s": 0.3144, "join_latency_ms": {"count": 750, "min": 0.195, "p50": 3.392, "p95": 10.001, "p99": 15.289, "max": 21.298, "mean": 4.147}, "chat_packets_delivered": 100000, "cross_room_leaks": 0, "chat_total_s": 0.1922, "chat_packets_per_sec": 520291.4, "chat_latency_ms": {"count": 50400, "min": 8.154, "p50": 111.263, "p95": 146.706, "p99": 151.032, "max": 156.04, "mean": 99.551}, "shutdown_ms": 47.36, "rc": 0, "stderr_bytes": 0, "resources": {"sample_count": 11, "peak_rss_mb": 29.688, "end_rss_mb": 28.613, "peak_private_mb": 23.773, "end_private_mb": 22.703, "peak_handles": 1115, "end_handles": 115, "peak_threads": 12, "cpu_user_s": 0.4688, "cpu_sys_s": 0.5781, "cpu_total_s": 1.0469}, "saved_logs": ["s2_multi4x250.cvlog"]}, "S3": {"scenario": "S3_Chaos_CrossStrand_Transfer", "total_clients": 200, "mid_transfer_drops": 60, "completed_transfers": 1371, "chaos_total_s": 1.5582, "transfer_latency_ms": {"count": 1371, "min": 7.248, "p50": 139.424, "p95": 679.888, "p99": 682.549, "max": 683.322, "mean": 204.12}, "survivors_expected": 140, "survivors_observed_sum": 140, "ghost_players": 0, "dropped_nicknames_reused": 60, "nickname_leaks": 0, "shutdown_ms": 52.49, "rc": 0, "stderr_bytes": 0, "resources": {"sample_count": 16, "peak_rss_mb": 14.074, "end_rss_mb": 13.902, "peak_private_mb": 8.086, "end_private_mb": 7.941, "peak_handles": 315, "end_handles": 115, "peak_threads": 12, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2969, "cpu_total_s": 0.3906}, "saved_logs": ["s3_chaos_transfer.cvlog"]}, "S4": {"scenario": "S4_Security_Backpressure_Idle", "malicious_disconnect_blocked": 60, "malicious_disconnect_total": 60, "malicious_login_rejected": 40, "malicious_login_total": 40, "slow_reader_blocked": 5, "slow_reader_total": 5, "idle_silent_blocked": 20, "idle_silent_total": 20, "normal_users_survived": 50, "normal_users_total": 50, "normal_min_pongs": 5, "shutdown_ms": 68.04, "rc": 0, "stderr_bytes": 0, "resources": {"sample_count": 14, "peak_rss_mb": 11.742, "end_rss_mb": 11.742, "peak_private_mb": 5.75, "end_private_mb": 5.75, "peak_handles": 216, "end_handles": 117, "peak_threads": 13, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156}, "saved_logs": ["s4_security_backpressure.cvtrace", "s4_security_backpressure.cvlog"]}}, "preserved_files": {"resource_samples.csv": 4466, "s1_single1000.cvlog": 142, "s2_multi4x250.cvlog": 142, "s3_chaos_transfer.cvlog": 141, "s4_security_backpressure.cvlog": 15592, "s4_security_backpressure.cvtrace": 41782080, "stress_summary.json": 5906}, "preserved_total_mb": 39.872}, "s1_series": [{"scenario": "s1_single1000", "phase": "init", "t_sec": 0.001, "rss_mb": 13.164, "private_mb": 6.59, "cpu_user_s": 0.0, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0156, "handles": 116, "threads": 12}, {"scenario": "s1_single1000", "phase": "login_1000", "t_sec": 0.11, "rss_mb": 13.164, "private_mb": 6.59, "cpu_user_s": 0.0, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0156, "handles": 116, "threads": 12}, {"scenario": "s1_single1000", "phase": "login_1000", "t_sec": 0.229, "rss_mb": 13.164, "private_mb": 6.59, "cpu_user_s": 0.0, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0156, "handles": 116, "threads": 12}, {"scenario": "s1_single1000", "phase": "login_1000", "t_sec": 0.338, "rss_mb": 15.0, "private_mb": 8.387, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0469, "cpu_total_s": 0.0625, "handles": 425, "threads": 12}, {"scenario": "s1_single1000", "phase": "login_1000", "t_sec": 0.46, "rss_mb": 19.059, "private_mb": 12.457, "cpu_user_s": 0.0781, "cpu_sys_s": 0.125, "cpu_total_s": 0.2031, "handles": 1121, "threads": 12}, {"scenario": "s1_single1000", "phase": "login_1000", "t_sec": 0.575, "rss_mb": 19.059, "private_mb": 12.457, "cpu_user_s": 0.0781, "cpu_sys_s": 0.125, "cpu_total_s": 0.2031, "handles": 1121, "threads": 12}, {"scenario": "s1_single1000", "phase": "chat_200k", "t_sec": 0.686, "rss_mb": 20.375, "private_mb": 13.766, "cpu_user_s": 0.0781, "cpu_sys_s": 0.1719, "cpu_total_s": 0.25, "handles": 1121, "threads": 12}, {"scenario": "s1_single1000", "phase": "chat_200k", "t_sec": 0.812, "rss_mb": 24.902, "private_mb": 18.336, "cpu_user_s": 0.2344, "cpu_sys_s": 0.4531, "cpu_total_s": 0.6875, "handles": 1121, "threads": 12}, {"scenario": "s1_single1000", "phase": "chat_200k", "t_sec": 0.93, "rss_mb": 25.82, "private_mb": 19.254, "cpu_user_s": 0.4375, "cpu_sys_s": 0.6562, "cpu_total_s": 1.0938, "handles": 1121, "threads": 12}, {"scenario": "s1_single1000", "phase": "disconnect_1000", "t_sec": 1.043, "rss_mb": 22.816, "private_mb": 16.297, "cpu_user_s": 0.5938, "cpu_sys_s": 0.8125, "cpu_total_s": 1.4062, "handles": 121, "threads": 12}, {"scenario": "s1_single1000", "phase": "disconnect_1000", "t_sec": 1.157, "rss_mb": 22.816, "private_mb": 16.297, "cpu_user_s": 0.5938, "cpu_sys_s": 0.8125, "cpu_total_s": 1.4062, "handles": 121, "threads": 12}, {"scenario": "s1_single1000", "phase": "disconnect_1000", "t_sec": 1.274, "rss_mb": 22.816, "private_mb": 16.297, "cpu_user_s": 0.5938, "cpu_sys_s": 0.8125, "cpu_total_s": 1.4062, "handles": 121, "threads": 12}, {"scenario": "s1_single1000", "phase": "disconnect_1000", "t_sec": 1.384, "rss_mb": 22.816, "private_mb": 16.297, "cpu_user_s": 0.5938, "cpu_sys_s": 0.8125, "cpu_total_s": 1.4062, "handles": 121, "threads": 12}], "s2_series": [{"scenario": "s2_multi4x250", "phase": "init", "t_sec": 0.0, "rss_mb": 12.57, "private_mb": 6.555, "cpu_user_s": 0.0, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0156, "handles": 109, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "login_and_distribute", "t_sec": 0.114, "rss_mb": 12.57, "private_mb": 6.555, "cpu_user_s": 0.0, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0156, "handles": 109, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "login_and_distribute", "t_sec": 0.225, "rss_mb": 13.531, "private_mb": 7.473, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0312, "handles": 301, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "login_and_distribute", "t_sec": 0.341, "rss_mb": 18.543, "private_mb": 12.477, "cpu_user_s": 0.1406, "cpu_sys_s": 0.1875, "cpu_total_s": 0.3281, "handles": 1115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "login_and_distribute", "t_sec": 0.45, "rss_mb": 18.617, "private_mb": 12.898, "cpu_user_s": 0.1406, "cpu_sys_s": 0.25, "cpu_total_s": 0.3906, "handles": 1115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "parallel_4room_chat", "t_sec": 0.577, "rss_mb": 18.617, "private_mb": 12.898, "cpu_user_s": 0.1406, "cpu_sys_s": 0.25, "cpu_total_s": 0.3906, "handles": 1115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "parallel_4room_chat", "t_sec": 0.694, "rss_mb": 29.688, "private_mb": 23.773, "cpu_user_s": 0.3125, "cpu_sys_s": 0.4688, "cpu_total_s": 0.7812, "handles": 1115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "disconnect_1000", "t_sec": 0.824, "rss_mb": 28.613, "private_mb": 22.703, "cpu_user_s": 0.4688, "cpu_sys_s": 0.5781, "cpu_total_s": 1.0469, "handles": 115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "disconnect_1000", "t_sec": 0.957, "rss_mb": 28.613, "private_mb": 22.703, "cpu_user_s": 0.4688, "cpu_sys_s": 0.5781, "cpu_total_s": 1.0469, "handles": 115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "disconnect_1000", "t_sec": 1.075, "rss_mb": 28.613, "private_mb": 22.703, "cpu_user_s": 0.4688, "cpu_sys_s": 0.5781, "cpu_total_s": 1.0469, "handles": 115, "threads": 12}, {"scenario": "s2_multi4x250", "phase": "disconnect_1000", "t_sec": 1.196, "rss_mb": 28.613, "private_mb": 22.703, "cpu_user_s": 0.4688, "cpu_sys_s": 0.5781, "cpu_total_s": 1.0469, "handles": 115, "threads": 12}], "s3_series": [{"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.015, "rss_mb": 12.41, "private_mb": 6.48, "cpu_user_s": 0.0, "cpu_sys_s": 0.0, "cpu_total_s": 0.0, "handles": 109, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.191, "rss_mb": 13.637, "private_mb": 7.66, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0156, "cpu_total_s": 0.0312, "handles": 310, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.392, "rss_mb": 13.965, "private_mb": 7.973, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0312, "cpu_total_s": 0.0469, "handles": 315, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.602, "rss_mb": 14.066, "private_mb": 8.074, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0312, "cpu_total_s": 0.0469, "handles": 315, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.783, "rss_mb": 14.07, "private_mb": 8.078, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0625, "cpu_total_s": 0.0781, "handles": 315, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 0.949, "rss_mb": 14.074, "private_mb": 8.082, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0938, "cpu_total_s": 0.1094, "handles": 314, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 1.128, "rss_mb": 14.059, "private_mb": 8.086, "cpu_user_s": 0.0156, "cpu_sys_s": 0.125, "cpu_total_s": 0.1406, "handles": 308, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 1.293, "rss_mb": 14.059, "private_mb": 8.086, "cpu_user_s": 0.0469, "cpu_sys_s": 0.1719, "cpu_total_s": 0.2188, "handles": 297, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 1.464, "rss_mb": 13.969, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.25, "cpu_total_s": 0.3438, "handles": 269, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "chaos_transfer", "t_sec": 1.641, "rss_mb": 14.02, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2812, "cpu_total_s": 0.375, "handles": 266, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "verify_consistency", "t_sec": 1.827, "rss_mb": 14.059, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2812, "cpu_total_s": 0.375, "handles": 255, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "verify_consistency", "t_sec": 1.998, "rss_mb": 14.059, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2812, "cpu_total_s": 0.375, "handles": 255, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "verify_consistency", "t_sec": 2.17, "rss_mb": 14.059, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2812, "cpu_total_s": 0.375, "handles": 255, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "verify_consistency", "t_sec": 2.335, "rss_mb": 14.066, "private_mb": 8.086, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2812, "cpu_total_s": 0.375, "handles": 305, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "verify_consistency", "t_sec": 2.506, "rss_mb": 13.902, "private_mb": 7.941, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2969, "cpu_total_s": 0.3906, "handles": 115, "threads": 12}, {"scenario": "s3_chaos_transfer", "phase": "shutdown", "t_sec": 2.677, "rss_mb": 13.902, "private_mb": 7.941, "cpu_user_s": 0.0938, "cpu_sys_s": 0.2969, "cpu_total_s": 0.3906, "handles": 115, "threads": 12}], "s4_series": [{"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.015, "rss_mb": 10.551, "private_mb": 4.633, "cpu_user_s": 0.0156, "cpu_sys_s": 0.0, "cpu_total_s": 0.0156, "handles": 112, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.18, "rss_mb": 11.156, "private_mb": 5.168, "cpu_user_s": 0.0312, "cpu_sys_s": 0.0312, "cpu_total_s": 0.0625, "handles": 216, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.345, "rss_mb": 11.566, "private_mb": 5.57, "cpu_user_s": 0.25, "cpu_sys_s": 0.1875, "cpu_total_s": 0.4375, "handles": 193, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.511, "rss_mb": 11.703, "private_mb": 5.707, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2188, "cpu_total_s": 0.5, "handles": 193, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.679, "rss_mb": 11.703, "private_mb": 5.707, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2188, "cpu_total_s": 0.5, "handles": 193, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 0.846, "rss_mb": 11.703, "private_mb": 5.707, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2188, "cpu_total_s": 0.5, "handles": 193, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.062, "rss_mb": 11.715, "private_mb": 5.719, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2188, "cpu_total_s": 0.5, "handles": 192, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.245, "rss_mb": 11.723, "private_mb": 5.727, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 167, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.418, "rss_mb": 11.723, "private_mb": 5.727, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 167, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.586, "rss_mb": 11.73, "private_mb": 5.734, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 167, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.75, "rss_mb": 11.73, "private_mb": 5.734, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 167, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 1.928, "rss_mb": 11.73, "private_mb": 5.734, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 167, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "normal_plus_attacks", "t_sec": 2.103, "rss_mb": 11.73, "private_mb": 5.734, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 117, "threads": 13}, {"scenario": "s4_security_backpressure", "phase": "shutdown", "t_sec": 2.283, "rss_mb": 11.742, "private_mb": 5.75, "cpu_user_s": 0.2812, "cpu_sys_s": 0.2344, "cpu_total_s": 0.5156, "handles": 117, "threads": 13}]};
+function svgEl(tag, attrs, text) {
+  const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, String(v));
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+(function drawBA() {
+  const svg = document.getElementById('chartBeforeAfter');
+  const b = DATA.baseline, a = DATA.summary.scenarios.S1;
+  const groups = [
+    { label: '1,000명 로그인(s)', before: b.login_total_s, after: a.login_total_s },
+    { label: '20만 채팅(s)', before: b.chat_total_s, after: a.chat_total_s },
+    { label: '누적 CPU(s)', before: b.cpu_total_s, after: a.resources.cpu_total_s }
+  ];
+  const maxV = Math.max(...groups.flatMap(g => [g.before, g.after])) * 1.15;
+  const baseY = 185, topY = 22, h = baseY - topY;
+  svg.appendChild(svgEl('line', { x1: 42, y1: baseY, x2: 440, y2: baseY, stroke: '#94a3b8' }));
+  groups.forEach((g, idx) => {
+    const cx = 105 + idx * 130;
+    const bh = (g.before / maxV) * h, ah = (g.after / maxV) * h;
+    svg.appendChild(svgEl('rect', { x: cx - 34, y: baseY - bh, width: 30, height: bh, fill: '#94a3b8', rx: 4 }));
+    svg.appendChild(svgEl('text', { x: cx - 19, y: baseY - bh - 5, 'text-anchor': 'middle', 'font-size': 10 }, g.before.toFixed(2)));
+    svg.appendChild(svgEl('rect', { x: cx + 4, y: baseY - ah, width: 30, height: ah, fill: '#0f766e', rx: 4 }));
+    svg.appendChild(svgEl('text', { x: cx + 19, y: baseY - ah - 5, 'text-anchor': 'middle', 'font-size': 10, 'font-weight': 700 }, g.after.toFixed(2)));
+    svg.appendChild(svgEl('text', { x: cx, y: 204, 'text-anchor': 'middle', 'font-size': 11 }, g.label));
+  });
+})();
+
+(function drawLat() {
+  const svg = document.getElementById('chartLatency');
+  const s = DATA.summary.scenarios;
+  const groups = [
+    { label: 'S1 로그인', vals: [s.S1.login_latency_ms.p50, s.S1.login_latency_ms.p95, s.S1.login_latency_ms.p99] },
+    { label: 'S1 채팅', vals: [s.S1.chat_latency_ms.p50, s.S1.chat_latency_ms.p95, s.S1.chat_latency_ms.p99] },
+    { label: 'S2 4방채팅', vals: [s.S2.chat_latency_ms.p50, s.S2.chat_latency_ms.p95, s.S2.chat_latency_ms.p99] },
+    { label: 'S3 방이동', vals: [s.S3.transfer_latency_ms.p50, s.S3.transfer_latency_ms.p95, s.S3.transfer_latency_ms.p99] }
+  ];
+  const cols = ['#14b8a6', '#3b82f6', '#ef4444'];
+  const maxV = Math.max(...groups.flatMap(g => g.vals), 10) * 1.2;
+  const baseY = 185, topY = 22, h = baseY - topY;
+  svg.appendChild(svgEl('line', { x1: 36, y1: baseY, x2: 445, y2: baseY, stroke: '#94a3b8' }));
+  groups.forEach((g, idx) => {
+    const cx = 86 + idx * 102;
+    g.vals.forEach((v, k) => {
+      const bh = (v / maxV) * h;
+      const x = cx - 33 + k * 23;
+      svg.appendChild(svgEl('rect', { x, y: baseY - bh, width: 19, height: bh, fill: cols[k], rx: 3 }));
+      svg.appendChild(svgEl('text', { x: x + 9.5, y: baseY - bh - 4, 'text-anchor': 'middle', 'font-size': 9 }, v.toFixed(0)));
+    });
+    svg.appendChild(svgEl('text', { x: cx, y: 204, 'text-anchor': 'middle', 'font-size': 11 }, g.label));
+  });
+})();
+
+function renderSeries(key, btn) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const arr = DATA[key] || [];
+  const svg = document.getElementById('chartSeries');
+  svg.innerHTML = '';
+  if (!arr.length) return;
+  const maxT = Math.max(...arr.map(x => x.t_sec), 1);
+  const maxR = Math.max(...arr.map(x => x.rss_mb), 10) * 1.15;
+  const maxH = Math.max(...arr.map(x => x.handles), 100) * 1.15;
+  const L = 58, R = 920, T = 20, B = 212, W = R - L, H = B - T;
+  svg.appendChild(svgEl('line', { x1: L, y1: B, x2: R, y2: B, stroke: '#94a3b8' }));
+  svg.appendChild(svgEl('line', { x1: L, y1: T, x2: L, y2: B, stroke: '#94a3b8' }));
+  const rssPts = arr.map(p => `${(L + (p.t_sec / maxT) * W).toFixed(1)},${(B - (p.rss_mb / maxR) * H).toFixed(1)}`).join(' ');
+  const hndPts = arr.map(p => `${(L + (p.t_sec / maxT) * W).toFixed(1)},${(B - (p.handles / maxH) * H).toFixed(1)}`).join(' ');
+  svg.appendChild(svgEl('polyline', { fill: 'none', stroke: '#0f766e', 'stroke-width': 2.4, points: rssPts }));
+  svg.appendChild(svgEl('polyline', { fill: 'none', stroke: '#2563eb', 'stroke-width': 2.0, 'stroke-dasharray': '6 3', points: hndPts }));
+  svg.appendChild(svgEl('text', { x: 8, y: T + 10, 'font-size': 11, fill: '#0f766e' }, maxR.toFixed(0) + ' MB'));
+  svg.appendChild(svgEl('text', { x: R + 6, y: T + 10, 'font-size': 11, fill: '#2563eb' }, maxH.toFixed(0) + ' Hnd'));
+  svg.appendChild(svgEl('text', { x: L, y: 236, 'font-size': 11 }, '0s'));
+  svg.appendChild(svgEl('text', { x: R - 30, y: 236, 'font-size': 11 }, maxT.toFixed(1) + 's'));
+  svg.appendChild(svgEl('text', { x: 420, y: 236, 'font-size': 11 }, '실선(청록): RSS(MB)  |  점선(파랑): OS Handle Count'));
+  document.getElementById('seriesTitle').textContent = `${btn ? btn.textContent : 'S1'} 시계열 프로파일 — 표본 ${arr.length}건 · 피크 RSS ${Math.max(...arr.map(x=>x.rss_mb)).toFixed(2)} MB · 최대 Handles ${Math.max(...arr.map(x=>x.handles))}`;
+}
+renderSeries('s1_series', document.querySelector('.tab.active'));
+</script>
+</body>
+</html>

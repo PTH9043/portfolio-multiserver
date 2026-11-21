@@ -19,8 +19,34 @@ namespace Protocol = multiplayer::protocol;
 
 SPACE_H(Server)
 
-UGameRoom::UGameRoom(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context, Core::uint64 roomID, Core::uint32 maxActorCount)
+namespace {
+// RTTI(dynamic_cast) 대신 ActorTypeID 정수 비교 후 static_cast로 UPlayer를 안전하게 변환한다.
+const UPlayer* TryCastPlayer(const Core::UActor* actor) noexcept
+{
+	if (!actor || actor->GetActorTypeID() != UPlayer::ActorTypeID)
+		return nullptr;
+	return static_cast<const UPlayer*>(actor);
+}
+}
+
+// 서버 전역 닉네임 테이블에 중복이 없으면 예약한다.
+bool UNicknameRegistry::TryReserve(const Core::STRINGVIEW nickname)
+{
+	Core::EXCLUSIVE_LOCK_GUARD lock{ _Lock };
+	return _NicknameContainer.emplace(nickname).second;
+}
+
+// 서버 전역 닉네임 테이블에서 예약된 닉네임을 해제한다.
+void UNicknameRegistry::Release(const Core::STRINGVIEW nickname)
+{
+	Core::EXCLUSIVE_LOCK_GUARD lock{ _Lock };
+	_NicknameContainer.erase(Core::FString{ nickname });
+}
+
+UGameRoom::UGameRoom(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context,
+	Core::uint64 roomID, Core::uint32 maxActorCount, Core::FString roomName)
 	: URoom{ std::move(coreInstance), context, roomID, maxActorCount },
+	  _RoomName{ std::move(roomName) },
 	  _CountBroadcastTimer{ context }
 {
 	RUNTIME_TRACE_EVENT(Create, UGameRoom, UGameRoom, GetRuntimeTraceID());
@@ -32,7 +58,7 @@ UGameRoom::~UGameRoom()
 	RUNTIME_TRACE_EVENT(Destroy, UGameRoom, ~UGameRoom, GetRuntimeTraceID());
 }
 
-// 방 strand에서 닉네임 중복·정원·세션 유효성을 판정해 플레이어를 입장시키고 결과를 통보한다.
+// 방 strand에서 정원·중복 입장·세션 유효성을 판정해 플레이어를 입장시키고 결과를 통보한다.
 bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUNC<void(EEnterResult, Core::uint32)> onComplete)
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, RequestEnterPlayer, GetRuntimeTraceID());
@@ -53,18 +79,13 @@ bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUN
 				onComplete(EEnterResult::AlreadyEntered, currentCount);
 			return;
 		}
-		if (_NicknameIndex.contains(player->GetInfo().Nickname)) {
-			if (onComplete)
-				onComplete(EEnterResult::DuplicateNickname, currentCount);
-			return;
-		}
 		if (GetActorCount() >= GetMaxActorCount()) {
 			if (onComplete)
 				onComplete(EEnterResult::RoomFull, currentCount);
 			return;
 		}
 
-		// 입장하는 본인에게는 SC_LOGIN_RESULT가 먼저 도착하도록 onComplete 후처리에서 인원 수를 보내고,
+		// 입장하는 본인에게는 SC_LOGIN_RESULT/SC_JOIN_ROOM_RESULT가 먼저 도착하도록 onComplete 후처리에서 인원 수를 보내고,
 		// 방 전체 인원 수 브로드캐스트는 짧은 간격으로 병합해 동시 입장 폭주 시 O(N^2) 송신을 방지한다.
 		_DeferEnteredCountBroadcast = true;
 		const bool entered = TryEnterOnStrand(player);
@@ -135,7 +156,7 @@ bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::ui
 
 		Core::uint32 collected{ 0 };
 		for (Core::uint64 index = offset; index < totalCount && collected < ROOM_USERS_PAGE_SIZE; ++index) {
-			const auto* player = dynamic_cast<const UPlayer*>(actors[index].get());
+			const UPlayer* player = TryCastPlayer(actors[index].get());
 			if (!player)
 				continue;
 			const Core::STRINGVIEW nickname{ player->GetInfo().Nickname.View() };
@@ -152,39 +173,20 @@ bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::ui
 	});
 }
 
-// 방 입장 전 닉네임 중복 여부를 확인한다.
-bool UGameRoom::CanEnter(const Core::SHPTR<Core::UActor>& actor) const
-{
-	if (!actor)
-		return false;
-
-	const auto* player = dynamic_cast<const UPlayer*>(actor.get());
-	if (player && _NicknameIndex.contains(player->GetInfo().Nickname))
-		return false;
-
-	return true;
-}
-
-// 입장 완료 시 닉네임 인덱스에 등록하고 인원 수 갱신 방송을 예약한다.
+// 입장 완료 시(기본 경로) 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorEntered(const Core::SHPTR<Core::UActor>& actor)
 {
+	(void)actor;
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorEntered, GetRuntimeTraceID());
-	const auto* player = dynamic_cast<const UPlayer*>(actor.get());
-	if (player)
-		_NicknameIndex.insert(player->GetInfo().Nickname);
-
 	if (!_DeferEnteredCountBroadcast)
 		ScheduleUserCountBroadcastOnStrand();
 }
 
-// 퇴장 완료 시 닉네임 인덱스에서 제거하고 인원 수 갱신 방송을 예약한다.
+// 퇴장 완료 시 남은 참가자에게 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorLeft(const Core::SHPTR<Core::UActor>& actor)
 {
+	(void)actor;
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorLeft, GetRuntimeTraceID());
-	const auto* player = dynamic_cast<const UPlayer*>(actor.get());
-	if (player)
-		_NicknameIndex.erase(player->GetInfo().Nickname);
-
 	ScheduleUserCountBroadcastOnStrand();
 }
 

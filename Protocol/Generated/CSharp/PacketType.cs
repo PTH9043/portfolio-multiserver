@@ -24,12 +24,14 @@ namespace Multiplayer.Protocol {
     static PacketTypeReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChFwYWNrZXRfdHlwZS5wcm90bxIUbXVsdGlwbGF5ZXIucHJvdG9jb2wqRgoJ",
+            "ChFwYWNrZXRfdHlwZS5wcm90bxIUbXVsdGlwbGF5ZXIucHJvdG9jb2wqdwoJ",
             "RUNTUGFja2V0EgsKB0NTX05PTkUQABIMCghDU19MT0dJThABEgsKB0NTX0NI",
-            "QVQQAhIRCg1DU19ST09NX1VTRVJTEAMqZQoJRVNDUGFja2V0EgsKB1NDX05P",
-            "TkUQABITCg9TQ19MT0dJTl9SRVNVTFQQARILCgdTQ19DSEFUEAISFgoSU0Nf",
-            "Uk9PTV9VU0VSX0NPVU5UEAMSEQoNU0NfUk9PTV9VU0VSUxAEQheqAhRNdWx0",
-            "aXBsYXllci5Qcm90b2NvbGIGcHJvdG8z"));
+            "QVQQAhIRCg1DU19ST09NX1VTRVJTEAMSEAoMQ1NfUk9PTV9MSVNUEAQSEAoM",
+            "Q1NfSk9JTl9ST09NEAUSCwoHQ1NfUElORxAGKp0BCglFU0NQYWNrZXQSCwoH",
+            "U0NfTk9ORRAAEhMKD1NDX0xPR0lOX1JFU1VMVBABEgsKB1NDX0NIQVQQAhIW",
+            "ChJTQ19ST09NX1VTRVJfQ09VTlQQAxIRCg1TQ19ST09NX1VTRVJTEAQSEAoM",
+            "U0NfUk9PTV9MSVNUEAUSFwoTU0NfSk9JTl9ST09NX1JFU1VMVBAGEgsKB1ND",
+            "X1BPTkcQB0IXqgIUTXVsdGlwbGF5ZXIuUHJvdG9jb2xiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::Multiplayer.Protocol.ECSPacket), typeof(global::Multiplayer.Protocol.ESCPacket), }, null, null));
@@ -55,6 +57,18 @@ namespace Multiplayer.Protocol {
     /// CSRoomUsers
     /// </summary>
     [pbr::OriginalName("CS_ROOM_USERS")] CsRoomUsers = 3,
+    /// <summary>
+    /// CSRoomList
+    /// </summary>
+    [pbr::OriginalName("CS_ROOM_LIST")] CsRoomList = 4,
+    /// <summary>
+    /// CSJoinRoom
+    /// </summary>
+    [pbr::OriginalName("CS_JOIN_ROOM")] CsJoinRoom = 5,
+    /// <summary>
+    /// CSPing
+    /// </summary>
+    [pbr::OriginalName("CS_PING")] CsPing = 6,
   }
 
   /// <summary>
@@ -78,6 +92,18 @@ namespace Multiplayer.Protocol {
     /// SCRoomUsers
     /// </summary>
     [pbr::OriginalName("SC_ROOM_USERS")] ScRoomUsers = 4,
+    /// <summary>
+    /// SCRoomList
+    /// </summary>
+    [pbr::OriginalName("SC_ROOM_LIST")] ScRoomList = 5,
+    /// <summary>
+    /// SCJoinRoomResult
+    /// </summary>
+    [pbr::OriginalName("SC_JOIN_ROOM_RESULT")] ScJoinRoomResult = 6,
+    /// <summary>
+    /// SCPong
+    /// </summary>
+    [pbr::OriginalName("SC_PONG")] ScPong = 7,
   }
 
   #endregion

@@ -21,8 +21,10 @@ namespace Protocol = multiplayer::protocol;
 
 SPACE_H(Server)
 
-UServerSession::UServerSession(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::TCPSOCKET socket)
-	: USession{ std::move(coreInstance), std::move(socket) }
+UServerSession::UServerSession(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::TCPSOCKET socket,
+	Core::SHPTR<UNicknameRegistry> nicknameRegistry)
+	: USession{ std::move(coreInstance), std::move(socket) },
+	  _NicknameRegistry{ std::move(nicknameRegistry) }
 {
 	RUNTIME_TRACE_EVENT(Create, UServerSession, UServerSession, GetRuntimeTraceID());
 }
@@ -40,8 +42,13 @@ void UServerSession::OnUnboundPacket(const Core::FPacketView& packet)
 	case Protocol::CS_LOGIN:
 		HandlePacket<Protocol::CSLogin>(packet);
 		break;
+	case Protocol::CS_PING:
+		HandlePacket<Protocol::CSPing>(packet);
+		break;
 	case Protocol::CS_CHAT:
 	case Protocol::CS_ROOM_USERS:
+	case Protocol::CS_ROOM_LIST:
+	case Protocol::CS_JOIN_ROOM:
 		RejectPacket(packet.GetType(), "not logged in");
 		break;
 	default:
@@ -126,16 +133,21 @@ void UServerSession::OnPacket(const Protocol::CSLogin& packet)
 
 	const auto coreInstance = GetCoreInstance();
 	const auto roomManager = coreInstance ? coreInstance->GetRoomManager() : nullptr;
-	const auto baseRoom = roomManager ? roomManager->FindRoom(DEFAULT_GAME_ROOM_ID) : nullptr;
-	const auto gameRoom = std::dynamic_pointer_cast<UGameRoom>(baseRoom);
+	const auto gameRoom = roomManager ? roomManager->FindRoomAs<UGameRoom>(DEFAULT_GAME_ROOM_ID) : nullptr;
 	if (!gameRoom) {
 		RejectPacket(Protocol::CS_LOGIN, "default game room not found");
 		return;
 	}
 
+	if (_NicknameRegistry && !_NicknameRegistry->TryReserve(nickname)) {
+		response.set_result(Protocol::LOGIN_RESULT_DUPLICATE_NICKNAME);
+		SendPacket(Protocol::SC_LOGIN_RESULT, response);
+		return;
+	}
+
 	const auto self = ThisShared<UServerSession>();
 	FPlayerInfo info{ Core::FString{ nickname } };
-	const auto player = Core::MakeShared<UPlayer>(coreInstance, std::move(info));
+	const auto player = Core::MakeShared<UPlayer>(coreInstance, std::move(info), _NicknameRegistry);
 	if (!player->AddComponent(self)) {
 		RejectPacket(Protocol::CS_LOGIN, "failed to attach session component");
 		return;
@@ -152,6 +164,15 @@ void UServerSession::OnPacket(const Protocol::CSLogin& packet)
 		_LoginPending = false;
 		RejectPacket(Protocol::CS_LOGIN, "failed to post room enter");
 	}
+}
+
+// 로그인 전 클라이언트 하트비트 Ping에도 즉시 Pong으로 응답한다.
+void UServerSession::OnPacket(const Protocol::CSPing& packet)
+{
+	RUNTIME_TRACE_SCOPE(UServerSession, OnPacket, GetRuntimeTraceID());
+	Protocol::SCPong response;
+	response.set_client_time_ms(packet.client_time_ms());
+	SendPacket(Protocol::SC_PONG, response);
 }
 
 // 비동기 방 입장 결과를 클라이언트에 응답하고, 도중 연결이 끊겼으면 즉시 방 퇴장을 요청한다.
@@ -175,6 +196,7 @@ void UServerSession::OnEnterRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom
 		player->SetGameRoom(gameRoom);
 		response.set_result(Protocol::LOGIN_RESULT_SUCCESS);
 		response.set_user_count(userCount);
+		response.set_room_id(static_cast<Core::uint32>(gameRoom->GetRoomID()));
 		SendPacket(Protocol::SC_LOGIN_RESULT, response);
 
 		Protocol::SCRoomUserCount countPacket;

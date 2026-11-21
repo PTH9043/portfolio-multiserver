@@ -105,7 +105,7 @@ UServerApp::~UServerApp()
 	RUNTIME_TRACE_EVENT(Destroy, UServerApp, ~UServerApp, _RuntimeTraceID.Get());
 }
 
-bool UServerApp::Start(const uint16 port)
+bool UServerApp::Start(const uint16 port, const MILLISECONDS sessionIdleTimeout)
 {
 	RUNTIME_TRACE_SCOPE(UServerApp, Start, _RuntimeTraceID.Get());
 	RETURN_INVALID_COND(_bRunning.load(), false);
@@ -134,7 +134,7 @@ bool UServerApp::Start(const uint16 port)
 			return false;
 		}
 
-		// 기본 방은 리스너가 접속을 받기 전에 먼저 등록해 둔다.
+		// 고정 채널 4개와 전역 닉네임 레지스트리는 리스너가 접속을 받기 전에 먼저 등록해 둔다.
 		const auto networkManager = _CoreInstance->GetNetworkManager();
 		const auto roomManager = _CoreInstance->GetRoomManager();
 		if (!networkManager || !roomManager) {
@@ -142,21 +142,25 @@ bool UServerApp::Start(const uint16 port)
 			ClearObject();
 			return false;
 		}
-		const auto defaultRoom = MakeShared<UGameRoom>(
-			_CoreInstance,
-			networkManager->GetIOContext(),
-			DEFAULT_GAME_ROOM_ID,
-			DEFAULT_ROOM_MAX_USERS);
-		if (!roomManager->AddRoom(defaultRoom)) {
-			std::cerr << "Default game room registration failed.\n";
-			ClearObject();
-			return false;
+		_NicknameRegistry = MakeShared<UNicknameRegistry>();
+		for (const FFixedRoomSpec& spec : FIXED_GAME_ROOMS) {
+			const auto room = MakeShared<UGameRoom>(
+				_CoreInstance,
+				networkManager->GetIOContext(),
+				spec.RoomID,
+				DEFAULT_ROOM_MAX_USERS,
+				FString{ spec.Name });
+			if (!roomManager->AddRoom(room)) {
+				std::cerr << "Fixed game room registration failed (roomID=" << spec.RoomID << ").\n";
+				ClearObject();
+				return false;
+			}
 		}
 
 		// 리스너는 네트워크 워커를 등록하기 전에 시작해야 한다. 지금은 이 PC(127.0.0.1)의 접속만 받는다.
 		BOOST_ERROR_CODE error;
 		const bool started = networkManager->StartListener(
-			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext()),
+			MakeShared<UServerListener>(_CoreInstance, networkManager->GetIOContext(), _NicknameRegistry, sessionIdleTimeout),
 			TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
 			[this](const BOOST_ERROR_CODE& acceptError) {
 				// 리스너는 accept 오류 뒤 새 접속을 받지 않으므로 서버를 끝낸다. 흔한 접속 중단은 Boost가 다시 받는다.
@@ -383,6 +387,7 @@ void UServerApp::ClearObject()
 {
 	RUNTIME_TRACE_SCOPE(UServerApp, ClearObject, _RuntimeTraceID.Get());
 	_ServerInput.reset();
+	_NicknameRegistry.reset();
 	_CoreInstance.reset();
 }
 

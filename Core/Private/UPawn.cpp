@@ -21,19 +21,15 @@ UPawn::~UPawn()
 	RUNTIME_TRACE_EVENT(Destroy, UPawn, ~UPawn, GetRuntimeTraceID());
 }
 
-// 컴포넌트를 유형 ID 슬롯에 등록하고 소유자(_Owner)를 연결한다.
-bool UPawn::AddComponent(const SHPTR<UComponent>& component)
+// 타입 검사를 통과한 컴포넌트를 유형 ID 슬롯에 등록하고 소유자(_Owner)를 연결한다.
+bool UPawn::AddComponentInternal(const SHPTR<UComponent>& component)
 {
-	RUNTIME_TRACE_SCOPE(UPawn, AddComponent, GetRuntimeTraceID());
+	RUNTIME_TRACE_SCOPE(UPawn, AddComponentInternal, GetRuntimeTraceID());
 	if (!component)
 		return false;
 
 	const uint32 typeID{ component->GetComponentTypeID() };
 	if (typeID == static_cast<uint32>(EComponentType::None) || component->HasOwner())
-		return false;
-
-	// GetSession()의 static_pointer_cast 안전성을 보장하기 위해 Session 슬롯은 USession 파생형만 허용한다.
-	if (typeID == USession::ComponentTypeID && !std::dynamic_pointer_cast<USession>(component))
 		return false;
 
 	const auto self = ThisWeak<UPawn>().lock();

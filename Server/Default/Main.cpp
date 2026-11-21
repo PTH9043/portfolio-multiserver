@@ -11,12 +11,10 @@
 #define RUNTIME_TRACE_SOURCE "Server/Default/Main.cpp"
 
 namespace {
-// 1 이상 maxValue 이하의 10진수만 받는다. 워커 수와 포트에 쓴다.
-bool ParsePositiveNumber(const char* text, const Core::uint32 maxValue, Core::uint32& result)
+// 0 이상 maxValue 이하의 10진수만 받는다. 유휴 타임아웃(0=비활성) 파싱에 쓴다.
+bool ParseNonNegativeNumber(const char* text, const Core::uint32 maxValue, Core::uint32& result)
 {
-	if (nullptr == text)
-		return false;
-	if ('\0' == *text)
+	if (nullptr == text || '\0' == *text)
 		return false;
 
 	Core::uint32 value = 0;
@@ -28,10 +26,16 @@ bool ParsePositiveNumber(const char* text, const Core::uint32 maxValue, Core::ui
 			return false;
 		value = value * 10 + digit;
 	}
-	if (value == 0)
-		return false;
 
 	result = value;
+	return true;
+}
+
+// 1 이상 maxValue 이하의 10진수만 받는다. 워커 수와 포트에 쓴다.
+bool ParsePositiveNumber(const char* text, const Core::uint32 maxValue, Core::uint32& result)
+{
+	if (!ParseNonNegativeNumber(text, maxValue, result) || result == 0)
+		return false;
 	return true;
 }
 
@@ -68,21 +72,32 @@ int main(int argc, char* argv[])
 	Core::uint32 workerCount = 0;
 	Core::uint32 port = 0;
 	Core::ERuntimeTraceMode traceMode = Core::ERuntimeTraceMode::AsyncStream;
-	if ((argc != 3 && argc != 4)
+	Core::MILLISECONDS idleTimeout = Core::SESSION_DEFAULT_IDLE_TIMEOUT;
+	if (argc < 3 || argc > 5
 		|| !ParsePositiveNumber(argv[1], static_cast<Core::uint32>(-1), workerCount)
 		|| !ParsePositiveNumber(argv[2], 65535, port)) {
-		fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off]\n");
+		fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
 		return 1;
 	}
-	if (argc == 4) {
-		if (strcmp(argv[3], "--trace=stream") == 0)
+	constexpr const char* IDLE_TIMEOUT_PREFIX = "--idle-timeout-ms=";
+	const Core::uint64 idlePrefixLen = static_cast<Core::uint64>(strlen(IDLE_TIMEOUT_PREFIX));
+	for (int i = 3; i < argc; ++i) {
+		if (strcmp(argv[i], "--trace=stream") == 0)
 			traceMode = Core::ERuntimeTraceMode::AsyncStream;
-		else if (strcmp(argv[3], "--trace=flight") == 0)
+		else if (strcmp(argv[i], "--trace=flight") == 0)
 			traceMode = Core::ERuntimeTraceMode::FlightRecorder;
-		else if (strcmp(argv[3], "--trace=off") == 0)
+		else if (strcmp(argv[i], "--trace=off") == 0)
 			traceMode = Core::ERuntimeTraceMode::Off;
+		else if (strncmp(argv[i], IDLE_TIMEOUT_PREFIX, idlePrefixLen) == 0) {
+			Core::uint32 idleMs = 0;
+			if (!ParseNonNegativeNumber(argv[i] + idlePrefixLen, 3600000, idleMs)) {
+				fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
+				return 1;
+			}
+			idleTimeout = Core::MILLISECONDS{ idleMs };
+		}
 		else {
-			fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off]\n");
+			fprintf(stderr, "Usage: ServerApp <network-worker-count> <port> [--trace=stream|flight|off] [--idle-timeout-ms=<ms>]\n");
 			return 1;
 		}
 	}
@@ -93,7 +108,7 @@ int main(int argc, char* argv[])
 	bool success = false;
 	{
 		Server::UServerApp serverApp;
-		if (serverApp.Start(static_cast<Core::uint16>(port))) {
+		if (serverApp.Start(static_cast<Core::uint16>(port), idleTimeout)) {
 			if (serverApp.RegisterWorkers(workerCount)) {
 				printf("Press Enter to stop the server.\n");
 				success = serverApp.JoinWorkers();

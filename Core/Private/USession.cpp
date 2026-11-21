@@ -20,7 +20,8 @@ SPACE_H(Core)
 USession::USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket)
     : UComponent{ std::move(coreInstance) },
       _Socket{ std::move(socket) },
-      _Strand{ ASIO::make_strand(_Socket.get_executor()) }
+      _Strand{ ASIO::make_strand(_Socket.get_executor()) },
+      _IdleTimer{ _Socket.get_executor() }
 {
 }
 
@@ -52,6 +53,13 @@ bool USession::IsEqual(const USession& other) const noexcept
     return this == &other;
 }
 
+// 유휴 수신 타임아웃(ms)을 설정한다(0 이하이면 비활성화).
+void USession::SetIdleTimeout(const MILLISECONDS timeout) noexcept
+{
+    const uint64 timeoutMs = timeout.count() > 0 ? static_cast<uint64>(timeout.count()) : 0ULL;
+    _IdleTimeoutMs.store(timeoutMs, std::memory_order_release);
+}
+
 void USession::Receive()
 {
     RUNTIME_TRACE_SCOPE(USession, Receive, GetRuntimeTraceID());
@@ -63,6 +71,8 @@ void USession::Receive()
         // 먼저 Close됐으면 수신을 시작하지 않는다.
         if (!session->_Socket.is_open())
             return;
+
+        session->ResetIdleTimerOnStrand();
 
         // 완료 처리를 _Strand에서 실행해 소켓·수신 버퍼·ProcessingData 접근을 직렬화한다.
         // 완료 처리가 Session을 붙잡아 수신이 걸려 있는 동안 Session이 소멸하지 않게 한다.
@@ -216,6 +226,7 @@ void USession::CloseConnection()
 {
     RUNTIME_TRACE_SCOPE(USession, CloseConnection, GetRuntimeTraceID());
     _Closed.store(true, std::memory_order_release);
+    CancelIdleTimerOnStrand();
 
     // 아직 전송 시작 전인 대기 버퍼만 즉시 비운다. 전송 중인 _SendingBatch는 취소 완료(OnSend)까지 유지한다.
     uint64 droppedBytes{ 0 };
@@ -260,6 +271,43 @@ void USession::CloseOnProcessingFailure(const STRINGVIEW reason)
     FString message{ "USession::ProcessingData failed: " };
     message << reason;
     logger->TryLog(ELogLevel::Error, message.View());
+}
+
+// 유휴 타임아웃 타이머를 현재 시점 기준으로 다시 예약한다(strand 내부 전용, 잠금 0개).
+void USession::ResetIdleTimerOnStrand()
+{
+    const uint64 timeoutMs = _IdleTimeoutMs.load(std::memory_order_acquire);
+    if (timeoutMs == 0 || !_Socket.is_open() || _Closed.load(std::memory_order_relaxed))
+        return;
+
+    const uint64 generation = ++_IdleGeneration;
+    _IdleTimer.expires_after(MILLISECONDS{ timeoutMs });
+    const auto weakSession = ThisWeak<USession>();
+    _IdleTimer.async_wait(ASIO::bind_executor(_Strand, [weakSession, generation, timeoutMs](const BOOST_ERROR_CODE& error) {
+        if (error)
+            return;
+        const auto session = weakSession.lock();
+        if (!session || session->_IdleGeneration != generation)
+            return;
+        if (!session->_Socket.is_open() || session->_Closed.load(std::memory_order_relaxed))
+            return;
+
+        const auto coreInstance = session->GetCoreInstance();
+        const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+        if (logger) {
+            FString message{ "USession idle timeout (" };
+            message << std::to_string(timeoutMs) << " ms); closing idle connection";
+            logger->TryLog(ELogLevel::Warning, message.View());
+        }
+        session->CloseConnection();
+    }));
+}
+
+// 진행 중인 유휴 타임아웃 타이머를 무효화하고 취소한다(strand 내부 전용).
+void USession::CancelIdleTimerOnStrand() noexcept
+{
+    ++_IdleGeneration;
+    _IdleTimer.cancel();
 }
 
 void USession::CombinePacket(const BOOST_ERROR_CODE& error, uint64 receivedBytes)
