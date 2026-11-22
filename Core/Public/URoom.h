@@ -43,7 +43,7 @@ public:
     // 어느 스레드에서나 잠금 없이 읽을 수 있는 현재 방 인원 수 스냅샷이다(입·퇴장 시 strand에서 원자 갱신).
     uint64 GetApproximateActorCount() const noexcept { return _PublishedActorCount.load(std::memory_order_relaxed); }
 
-    // 어느 스레드에서나 호출할 수 있다. true는 게시 성공이며 정원·중복·CanEnter 판정과 입장 결과는
+    // 어느 스레드에서나 호출할 수 있다. true는 게시 성공이며 정원·중복 판정과 입장 결과는
     // onComplete(선택)로 이 Room의 strand에서 전달한다.
     // Room이 shared_ptr 소유가 아니거나 actor가 비어 있으면 false다.
     // io_context가 종료되거나 중지되면 onComplete가 실행되지 않을 수 있다. 게시 예외는 호출자에게 전달한다.
@@ -58,18 +58,12 @@ public:
     // LeaveOnStrand 결과를 onComplete(선택)로 이 Room의 strand에서 알린다.
     bool RequestLeaveWithCallback(const SHPTR<UActor>& actor, FUNC<void(bool)> onComplete = nullptr);
 
-    // 어느 스레드에서나 호출할 수 있다. 이 Room의 strand에서 현재 참가 중인 통신 액터(GetSession() != nullptr)에
-    // 송신을 요청한다. data와 packetSize는 헤더를 제외한 본문과 본문 크기이며 호출 중에 복사한다.
-    // packetSize가 PACKET_MAX_BODY_SIZE를 넘거나 본문이 있는데 data가 비어 있으면 보내지 않는다.
-    // Room이 shared_ptr 소유가 아니면 std::bad_weak_ptr을 던지며, 게시 예외는 호출자에게 전달한다.
-    void RequestBroadcast(const void* data, uint64 packetSize, uint16 packetType);
-
 protected:
     // 어느 스레드에서나 호출할 수 있다. task를 이 Room의 strand에 게시하며, 실행이 끝날 때까지 Room을 유지한다.
     // Room이 shared_ptr 소유가 아니거나 task가 비어 있으면 false다. 게시 예외는 호출자에게 전달한다.
     bool PostToRoom(FUNC<void()> task);
 
-    // 이 Room의 strand에서만 호출한다. 정원·중복·CanEnter를 검사해 통과하면 _ActorContainer에 등록하고
+    // 이 Room의 strand에서만 호출한다. 정원·중복을 검사해 통과하면 _ActorContainer에 등록하고
     // actor->SetRoomID(_RoomID)와 OnActorEntered를 실행한 뒤 true를 돌려준다.
     bool TryEnterOnStrand(const SHPTR<UActor>& actor);
 
@@ -93,10 +87,6 @@ protected:
     // 이 Room의 strand에서만 호출한다. 이미 조립된 불변 송신 프레임을 현재 참가 중인 통신 액터들에게 공유 송신한다.
     // excludedActor가 지정되면 해당 액터를 제외한다.
     void BroadcastSharedOnStrand(const SHPTR<const BUFFER>& framedBuffer, const UActor* excludedActor = nullptr) const;
-
-    // 이 Room의 strand에서 TryEnterOnStrand의 정원·중복 검사 뒤에 호출된다.
-    // 파생 방이 입장 가능 조건을 추가 검사할 때 재정의한다. 기본값은 true다.
-    virtual bool CanEnter(const SHPTR<UActor>& actor) const;
 
     // 이 Room의 strand에서 액터가 목록에 추가되고 RoomID가 기록된 직후 호출된다.
     virtual void OnActorEntered(const SHPTR<UActor>& actor);

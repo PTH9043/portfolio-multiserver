@@ -45,8 +45,6 @@ namespace Core
 	using ATOMIC_BOOL = ATOMIC<bool>;
 
 	// 바이트 데이터는 uint8 을 쓴다. (byte 별칭은 char 라 부호가 있고 Windows 의 byte 와 이름이 겹쳐서 없앴다)
-	using WCHAR = wchar_t;
-
 	using STRINGVIEW = std::string_view;
 
 	// 읽기는 여럿이 동시에, 쓰기는 혼자 들어가는 잠금이다. 세 개를 한 벌로 쓴다.
@@ -81,9 +79,6 @@ namespace Core
 	template<class T>
 	using FUNC = std::function<T>;
 
-	// 서버 ID 는 uint64 로 정의한다.
-	using SERVERID = uint64;
-
 	// shared_mutex와 함께 대기할 수 있는 조건 변수다.
 	using COND_VARIABLE = std::condition_variable_any;
 
@@ -107,8 +102,7 @@ namespace Core
 	using WORK_GUARD = ASIO::executor_work_guard<T>;
 
 	using MILLISECONDS = std::chrono::milliseconds;
-	using SECONDS = std::chrono::seconds;
-	
+
 	using BOOST_STEADY_TIMER = ASIO::steady_timer;
 	using BOOST_ERROR_CODE = boost::system::error_code;
 }

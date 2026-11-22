@@ -12,9 +12,6 @@
 // 조건이 맞으면 Continue를 발생시키는 매크로
 #define CONTINUE_COND(Cond) if(Cond){continue;}
 
-// Using문을 활용한 매크로
-#define MAKE_USINGTYPE(FromType, ToType) using ToType = FromType;
-
 // ThrowValue를 던지면서 조건이 맞으면 throw를 발생시키는 매크로
 #define THROW_INVALID_COND(Cond, ThrowValue) if(Cond){ throw ThrowValue;}
 

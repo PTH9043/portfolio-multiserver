@@ -2,6 +2,7 @@
 #include "ChatProtocolLimits.h"
 #include "UDatabaseManager.h"
 #include "UGameRoom.h"
+#include "UServerSession.h"
 #include "USession.h"
 #include "UCoreInstance.h"
 #include "URoomManager.h"
@@ -25,12 +26,10 @@ SPACE_H(Server)
 UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance,
 	Core::SHPTR<UNicknameRegistry> nicknameRegistry,
 	Core::SHPTR<UDatabaseManager> databaseManager,
-	Core::FString remoteIp,
 	FDisconnectCleanupCallback onDisconnectedCleanup)
 	: UPawn{ std::move(coreInstance) },
 	  _NicknameRegistry{ std::move(nicknameRegistry) },
 	  _DatabaseManager{ std::move(databaseManager) },
-	  _RemoteIp{ std::move(remoteIp) },
 	  _OnDisconnectedCleanup{ std::move(onDisconnectedCleanup) }
 {
 	RUNTIME_TRACE_EVENT(Create, UPlayer, UPlayer, GetRuntimeTraceID());
@@ -39,10 +38,7 @@ UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance,
 UPlayer::~UPlayer()
 {
 	ReleaseNicknameOnce();
-	if (_DatabaseManager && _Info.ConnectionLogID != 0
-		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
-		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, _LastRoomID, Core::FString{ "CLEANUP" });
-	}
+	EnqueueLogoutOnce(_LastRoomID, "CLEANUP");
 	RUNTIME_TRACE_EVENT(Destroy, UPlayer, ~UPlayer, GetRuntimeTraceID());
 }
 
@@ -64,10 +60,7 @@ void UPlayer::OnSessionDisconnected()
 	if (gameRoom)
 		gameRoom->RequestLeave(keepAlive);
 
-	if (_DatabaseManager && _Info.ConnectionLogID != 0
-		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
-		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, _LastRoomID, _DisconnectReason);
-	}
+	EnqueueLogoutOnce(_LastRoomID, _DisconnectReason.View());
 
 	if (FDisconnectCleanupCallback cleanup = std::move(_OnDisconnectedCleanup))
 		cleanup(keepAlive);
@@ -212,7 +205,7 @@ void UPlayer::OnPacket(const Protocol::CSLogin& packet)
 		const Core::WKPTR<Core::USession> weakSession = session;
 		const auto dbManager = _DatabaseManager;
 		const bool queued = dbManager->EnqueueLogin(
-			Core::FString{ username }, Core::FString{ password }, _RemoteIp,
+			Core::FString{ username }, Core::FString{ password }, GetSessionRemoteIp(),
 			[weakSelf, weakSession, dbManager](FDbLoginOutcome outcome) {
 				const auto self = weakSelf.lock();
 				const auto boundSession = weakSession.lock();
@@ -243,163 +236,6 @@ void UPlayer::OnPacket(const Protocol::CSLogin& packet)
 	}
 
 	BeginInitialRoomEnter(Core::FString{ nickname }, 0, 0);
-}
-
-void UPlayer::OnDbRegisterCompleted(const EDbRegisterStatus status)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, OnDbRegisterCompleted, GetRuntimeTraceID());
-	_RegisterPending = false;
-	if (_Disconnected)
-		return;
-
-	Protocol::SCRegisterResult response;
-	switch (status) {
-	case EDbRegisterStatus::Success:
-		response.set_result(Protocol::REGISTER_RESULT_SUCCESS);
-		break;
-	case EDbRegisterStatus::DuplicateUsername:
-		response.set_result(Protocol::REGISTER_RESULT_DUPLICATE_USERNAME);
-		break;
-	case EDbRegisterStatus::DuplicateNickname:
-		response.set_result(Protocol::REGISTER_RESULT_DUPLICATE_NICKNAME);
-		break;
-	default:
-		response.set_result(Protocol::REGISTER_RESULT_DB_ERROR);
-		break;
-	}
-	SendPacket(Protocol::SC_REGISTER_RESULT, response);
-}
-
-void UPlayer::OnDbLoginCompleted(const FDbLoginOutcome& outcome)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, OnDbLoginCompleted, GetRuntimeTraceID());
-	if (_Disconnected) {
-		_LoginPending = false;
-		if (outcome.Status == EDbLoginStatus::Success && outcome.ConnectionLogID != 0 && _DatabaseManager) {
-			_DatabaseManager->EnqueueLogout(outcome.ConnectionLogID, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID),
-				Core::FString{ "ABORTED_LOGIN" });
-		}
-		return;
-	}
-
-	if (outcome.Status != EDbLoginStatus::Success) {
-		_LoginPending = false;
-		Protocol::SCLoginResult response;
-		response.set_result(outcome.Status == EDbLoginStatus::InvalidCredentials
-			? Protocol::LOGIN_RESULT_INVALID_CREDENTIALS
-			: Protocol::LOGIN_RESULT_DB_ERROR);
-		SendPacket(Protocol::SC_LOGIN_RESULT, response);
-		return;
-	}
-
-	BeginInitialRoomEnter(outcome.Nickname, outcome.AccountID, outcome.ConnectionLogID);
-}
-
-void UPlayer::BeginInitialRoomEnter(Core::FString nickname, const Core::uint64 accountId, const Core::uint64 connectionLogId)
-{
-	Protocol::SCLoginResult response;
-	const auto coreInstance = GetCoreInstance();
-	const auto session = GetSession();
-	const auto roomManager = coreInstance ? coreInstance->GetRoomManager() : nullptr;
-	const auto gameRoom = roomManager ? roomManager->FindRoomAs<UGameRoom>(DEFAULT_GAME_ROOM_ID) : nullptr;
-	if (!gameRoom || !session) {
-		_LoginPending = false;
-		if (connectionLogId != 0 && _DatabaseManager)
-			_DatabaseManager->EnqueueLogout(connectionLogId, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ROOM_NOT_FOUND" });
-		RejectPacket(Protocol::CS_LOGIN, "default game room not found");
-		return;
-	}
-
-	if (_NicknameRegistry && !_NicknameRegistry->TryReserve(nickname.View())) {
-		_LoginPending = false;
-		if (connectionLogId != 0 && _DatabaseManager)
-			_DatabaseManager->EnqueueLogout(connectionLogId, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ALREADY_ONLINE" });
-		response.set_result(accountId != 0 ? Protocol::LOGIN_RESULT_ALREADY_ONLINE : Protocol::LOGIN_RESULT_DUPLICATE_NICKNAME);
-		SendPacket(Protocol::SC_LOGIN_RESULT, response);
-		return;
-	}
-
-	_Info = FPlayerInfo{ std::move(nickname), accountId, connectionLogId };
-	_NicknameReserved.store(true, std::memory_order_release);
-	_LogoutRecorded.store(false, std::memory_order_release);
-	_LoginPending = true;
-
-	const auto self = ThisShared<UPlayer>();
-	const bool posted = gameRoom->RequestEnterPlayer(self,
-		[self, session, gameRoom](UGameRoom::EEnterResult result, Core::uint32 userCount) {
-			session->PostToSession([self, gameRoom, result, userCount] {
-				self->OnEnterInitialRoomCompleted(gameRoom, result, userCount);
-			});
-		});
-	if (!posted) {
-		_LoginPending = false;
-		ReleaseNicknameOnce();
-		if (connectionLogId != 0 && _DatabaseManager
-			&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
-			_DatabaseManager->EnqueueLogout(connectionLogId, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ROOM_POST_FAIL" });
-		}
-		_Info = FPlayerInfo{};
-		RejectPacket(Protocol::CS_LOGIN, "failed to post room enter");
-	}
-}
-
-void UPlayer::OnEnterInitialRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom,
-	const UGameRoom::EEnterResult result, const Core::uint32 userCount)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, OnEnterInitialRoomCompleted, GetRuntimeTraceID());
-	_LoginPending = false;
-	if (_Disconnected) {
-		if (result == UGameRoom::EEnterResult::Success && gameRoom)
-			gameRoom->RequestLeave(ThisShared<UPlayer>());
-		return;
-	}
-
-	if (result == UGameRoom::EEnterResult::InvalidActor)
-		return;
-
-	Protocol::SCLoginResult response;
-	if (result == UGameRoom::EEnterResult::Success && gameRoom) {
-		_LoggedIn = true;
-		_GameRoom = gameRoom;
-		_LastRoomID = static_cast<Core::uint32>(gameRoom->GetRoomID());
-
-		response.set_result(Protocol::LOGIN_RESULT_SUCCESS);
-		response.set_user_count(userCount);
-		response.set_room_id(static_cast<Core::uint32>(gameRoom->GetRoomID()));
-		const Core::STRINGVIEW confirmedNick = _Info.Nickname.View();
-		response.set_nickname(confirmedNick.data(), confirmedNick.size());
-		SendPacket(Protocol::SC_LOGIN_RESULT, response);
-
-		Protocol::SCRoomUserCount countPacket;
-		countPacket.set_count(userCount);
-		SendPacket(Protocol::SC_ROOM_USER_COUNT, countPacket);
-		return;
-	}
-
-	// 입장 실패 시 예약 닉네임과 접속 이력을 즉시 정리해 동일 연결 재시도를 허용한다.
-	ReleaseNicknameOnce();
-	if (_DatabaseManager && _Info.ConnectionLogID != 0
-		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
-		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ENTER_REJECTED" });
-	}
-	_Info = FPlayerInfo{};
-
-	switch (result) {
-	case UGameRoom::EEnterResult::DuplicateNickname:
-		response.set_result(Protocol::LOGIN_RESULT_DUPLICATE_NICKNAME);
-		break;
-	case UGameRoom::EEnterResult::RoomFull:
-		response.set_result(Protocol::LOGIN_RESULT_ROOM_FULL);
-		break;
-	case UGameRoom::EEnterResult::AlreadyEntered:
-		response.set_result(Protocol::LOGIN_RESULT_ALREADY_LOGGED_IN);
-		break;
-	default:
-		response.set_result(Protocol::LOGIN_RESULT_NONE);
-		break;
-	}
-
-	SendPacket(Protocol::SC_LOGIN_RESULT, response);
 }
 
 // 채팅 문자열을 검증한 뒤 소속 방 전체에 브로드캐스트를 요청한다.
@@ -524,6 +360,154 @@ void UPlayer::OnPacket(const Protocol::CSJoinRoom& packet)
 	}
 }
 
+void UPlayer::OnDbRegisterCompleted(const EDbRegisterStatus status)
+{
+	RUNTIME_TRACE_SCOPE(UPlayer, OnDbRegisterCompleted, GetRuntimeTraceID());
+	_RegisterPending = false;
+	if (_Disconnected)
+		return;
+
+	Protocol::SCRegisterResult response;
+	switch (status) {
+	case EDbRegisterStatus::Success:
+		response.set_result(Protocol::REGISTER_RESULT_SUCCESS);
+		break;
+	case EDbRegisterStatus::DuplicateUsername:
+		response.set_result(Protocol::REGISTER_RESULT_DUPLICATE_USERNAME);
+		break;
+	case EDbRegisterStatus::DuplicateNickname:
+		response.set_result(Protocol::REGISTER_RESULT_DUPLICATE_NICKNAME);
+		break;
+	default:
+		response.set_result(Protocol::REGISTER_RESULT_DB_ERROR);
+		break;
+	}
+	SendPacket(Protocol::SC_REGISTER_RESULT, response);
+}
+
+void UPlayer::OnDbLoginCompleted(const FDbLoginOutcome& outcome)
+{
+	RUNTIME_TRACE_SCOPE(UPlayer, OnDbLoginCompleted, GetRuntimeTraceID());
+	if (_Disconnected) {
+		_LoginPending = false;
+		if (outcome.Status == EDbLoginStatus::Success && outcome.ConnectionLogID != 0 && _DatabaseManager) {
+			_DatabaseManager->EnqueueLogout(outcome.ConnectionLogID, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID),
+				Core::FString{ "ABORTED_LOGIN" });
+		}
+		return;
+	}
+
+	if (outcome.Status != EDbLoginStatus::Success) {
+		_LoginPending = false;
+		Protocol::SCLoginResult response;
+		response.set_result(outcome.Status == EDbLoginStatus::InvalidCredentials
+			? Protocol::LOGIN_RESULT_INVALID_CREDENTIALS
+			: Protocol::LOGIN_RESULT_DB_ERROR);
+		SendPacket(Protocol::SC_LOGIN_RESULT, response);
+		return;
+	}
+
+	BeginInitialRoomEnter(outcome.Nickname, outcome.AccountID, outcome.ConnectionLogID);
+}
+
+void UPlayer::BeginInitialRoomEnter(Core::FString nickname, const Core::uint64 accountId, const Core::uint64 connectionLogId)
+{
+	Protocol::SCLoginResult response;
+	const auto coreInstance = GetCoreInstance();
+	const auto session = GetSession();
+	const auto roomManager = coreInstance ? coreInstance->GetRoomManager() : nullptr;
+	const auto gameRoom = roomManager ? roomManager->FindRoomAs<UGameRoom>(DEFAULT_GAME_ROOM_ID) : nullptr;
+	if (!gameRoom || !session) {
+		_LoginPending = false;
+		if (connectionLogId != 0 && _DatabaseManager)
+			_DatabaseManager->EnqueueLogout(connectionLogId, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ROOM_NOT_FOUND" });
+		RejectPacket(Protocol::CS_LOGIN, "default game room not found");
+		return;
+	}
+
+	if (_NicknameRegistry && !_NicknameRegistry->TryReserve(nickname.View())) {
+		_LoginPending = false;
+		if (connectionLogId != 0 && _DatabaseManager)
+			_DatabaseManager->EnqueueLogout(connectionLogId, static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), Core::FString{ "ALREADY_ONLINE" });
+		response.set_result(accountId != 0 ? Protocol::LOGIN_RESULT_ALREADY_ONLINE : Protocol::LOGIN_RESULT_DUPLICATE_NICKNAME);
+		SendPacket(Protocol::SC_LOGIN_RESULT, response);
+		return;
+	}
+
+	_Info = FPlayerInfo{ std::move(nickname), accountId, connectionLogId };
+	_NicknameReserved.store(true, std::memory_order_release);
+	_LogoutRecorded.store(false, std::memory_order_release);
+	_LoginPending = true;
+
+	const auto self = ThisShared<UPlayer>();
+	const bool posted = gameRoom->RequestEnterPlayer(self,
+		[self, session, gameRoom](UGameRoom::EEnterResult result, Core::uint32 userCount) {
+			session->PostToSession([self, gameRoom, result, userCount] {
+				self->OnEnterInitialRoomCompleted(gameRoom, result, userCount);
+			});
+		});
+	if (!posted) {
+		_LoginPending = false;
+		ReleaseNicknameOnce();
+		EnqueueLogoutOnce(static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), "ROOM_POST_FAIL");
+		_Info = FPlayerInfo{};
+		RejectPacket(Protocol::CS_LOGIN, "failed to post room enter");
+	}
+}
+
+void UPlayer::OnEnterInitialRoomCompleted(const Core::SHPTR<UGameRoom>& gameRoom,
+	const UGameRoom::EEnterResult result, const Core::uint32 userCount)
+{
+	RUNTIME_TRACE_SCOPE(UPlayer, OnEnterInitialRoomCompleted, GetRuntimeTraceID());
+	_LoginPending = false;
+	if (_Disconnected) {
+		if (result == UGameRoom::EEnterResult::Success && gameRoom)
+			gameRoom->RequestLeave(ThisShared<UPlayer>());
+		return;
+	}
+
+	if (result == UGameRoom::EEnterResult::InvalidActor)
+		return;
+
+	Protocol::SCLoginResult response;
+	if (result == UGameRoom::EEnterResult::Success && gameRoom) {
+		_LoggedIn = true;
+		_GameRoom = gameRoom;
+		_LastRoomID = static_cast<Core::uint32>(gameRoom->GetRoomID());
+
+		response.set_result(Protocol::LOGIN_RESULT_SUCCESS);
+		response.set_user_count(userCount);
+		response.set_room_id(static_cast<Core::uint32>(gameRoom->GetRoomID()));
+		const Core::STRINGVIEW confirmedNick = _Info.Nickname.View();
+		response.set_nickname(confirmedNick.data(), confirmedNick.size());
+		SendPacket(Protocol::SC_LOGIN_RESULT, response);
+
+		Protocol::SCRoomUserCount countPacket;
+		countPacket.set_count(userCount);
+		SendPacket(Protocol::SC_ROOM_USER_COUNT, countPacket);
+		return;
+	}
+
+	// 입장 실패 시 예약 닉네임과 접속 이력을 즉시 정리해 동일 연결 재시도를 허용한다.
+	ReleaseNicknameOnce();
+	EnqueueLogoutOnce(static_cast<Core::uint32>(DEFAULT_GAME_ROOM_ID), "ENTER_REJECTED");
+	_Info = FPlayerInfo{};
+
+	switch (result) {
+	case UGameRoom::EEnterResult::RoomFull:
+		response.set_result(Protocol::LOGIN_RESULT_ROOM_FULL);
+		break;
+	case UGameRoom::EEnterResult::AlreadyEntered:
+		response.set_result(Protocol::LOGIN_RESULT_ALREADY_LOGGED_IN);
+		break;
+	default:
+		response.set_result(Protocol::LOGIN_RESULT_NONE);
+		break;
+	}
+
+	SendPacket(Protocol::SC_LOGIN_RESULT, response);
+}
+
 // 이전 방 퇴장 완료 후 대상 방 입장을 요청한다(중도 이탈 시 즉시 중단).
 void UPlayer::OnLeaveRoomForTransferCompleted(const Core::SHPTR<UGameRoom>& previousRoom, const Core::SHPTR<UGameRoom>& targetRoom)
 {
@@ -625,6 +609,24 @@ void UPlayer::OnRollbackPreviousRoomCompleted(const Core::SHPTR<UGameRoom>& prev
 		_GameRoom.reset();
 	}
 	SendPacket(Protocol::SC_JOIN_ROOM_RESULT, response);
+}
+
+// 장착된 UServerSession에서 원격 IP를 단일 출처로 읽는다(TypeID 확인 후 static_cast).
+Core::FString UPlayer::GetSessionRemoteIp() const
+{
+	const auto session = GetSession();
+	if (session && session->GetSessionTypeID() == UServerSession::SessionTypeID)
+		return static_cast<const UServerSession*>(session.get())->GetRemoteIp();
+	return Core::FString{ "127.0.0.1" };
+}
+
+// DB 접속 이력의 로그아웃 기록을 원자 플래그로 정확히 1회만 큐에 적재한다.
+void UPlayer::EnqueueLogoutOnce(const Core::uint32 roomId, const Core::STRINGVIEW reason) noexcept
+{
+	if (_DatabaseManager && _Info.ConnectionLogID != 0
+		&& !_LogoutRecorded.exchange(true, std::memory_order_acq_rel)) {
+		_DatabaseManager->EnqueueLogout(_Info.ConnectionLogID, roomId, Core::FString{ reason });
+	}
 }
 
 // 예약된 전역 닉네임을 원자 플래그로 정확히 1회만 해제한다.

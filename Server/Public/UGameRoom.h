@@ -35,7 +35,6 @@ public:
 
 	enum class EEnterResult : Core::uint8 {
 		Success,
-		DuplicateNickname,
 		RoomFull,
 		AlreadyEntered,
 		InvalidActor

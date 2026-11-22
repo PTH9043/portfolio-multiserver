@@ -2,7 +2,6 @@
 
 #include "CoreDefine.h"
 #include "UComponent.h"
-#include "IHashable.h"
 #include "Packet.h"
 #include <boost/asio/strand.hpp>
 
@@ -16,7 +15,7 @@ STATIC_CONSTEXPR MILLISECONDS SESSION_DEFAULT_IDLE_TIMEOUT{ 30000 };
 // UActor에 장착되는 TCP 통신 컴포넌트다.
 // 바이트 스트림을 [4B 헤더 + 본문]으로 조립해 SafeGuard(FPacketView)로 소유자 UActor::OnReceivePacket에 전달하며,
 // 송신 배칭 · 1 MiB 백프레셔 · 유휴 타임아웃을 담당한다. 상위 프로젝트는 UServerSession 등으로 확장할 수 있다.
-class CORE_DLL USession : public UComponent, public IHashable<USession> {
+class CORE_DLL USession : public UComponent {
 public:
     explicit USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket);
     virtual ~USession() override;
@@ -27,14 +26,13 @@ public:
     // 세션 컴포넌트의 고정 유형 ID를 돌려준다.
     uint32 GetComponentTypeID() const noexcept final override { return ComponentTypeID; }
 
+    // 파생 세션(Server::UServerSession 등)을 RTTI 없이 안전하게 판별하기 위한 고정 유형 ID다.
+    virtual uint32 GetSessionTypeID() const noexcept { return 0; }
+
     // 헤더와 본문을 하나의 불변 송신 프레임으로 조립한다. 방 브로드캐스트처럼 같은 패킷을 여러 세션에 보낼 때
     // 한 번만 생성해 SendShared로 공유하면 수신자 수만큼의 메모리 할당과 복사를 없앨 수 있다.
     // packetSize가 PACKET_MAX_BODY_SIZE를 넘거나 본문이 있는데 data가 비어 있으면 빈 포인터를 돌려준다.
     static SHPTR<const BUFFER> MakePacketBuffer(const void* data, uint64 packetSize, uint16 packetType);
-
-    // 세션은 객체 주소를 기준으로 식별한다.
-    uint64 GetHash() const noexcept final override;
-    bool IsEqual(const USession& other) const noexcept final override;
 
     // 어느 스레드에서나 호출할 수 있다. Receive 시작 전에 유휴 수신 타임아웃을 설정한다(0ms이면 비활성화).
     // 지정 시간 동안 수신 데이터가 전혀 없으면 Warning을 남기고 이 Session의 strand에서 연결을 닫는다.
@@ -61,11 +59,6 @@ public:
     // 어느 스레드에서나 호출할 수 있다. task를 이 Session의 strand에 게시하며, 실행이 끝날 때까지 Session을 유지한다.
     // Session이 shared_ptr 소유가 아니거나 task가 비어 있으면 false다.
     bool PostToSession(FUNC<void()> task);
-
-protected:
-    // 이 Session의 strand에서 연결이 닫힐 때 정확히 한 번 호출된다.
-    // 파생 세션(UServerSession 등)의 전송 계층 정리 후 소유자 UActor::OnSessionDisconnected가 이어서 호출된다.
-    virtual void OnDisconnected();
 
 private:
     // 완성된 SafeGuard 패킷 뷰를 소유자 UActor에 전달한다(이 Session의 strand 전용).

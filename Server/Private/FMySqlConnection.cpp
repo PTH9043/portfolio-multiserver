@@ -43,8 +43,7 @@ public:
 			mysql_stmt_close(_Stmt);
 	}
 
-	FMySqlStmtGuard(const FMySqlStmtGuard&) = delete;
-	FMySqlStmtGuard& operator=(const FMySqlStmtGuard&) = delete;
+	NO_COPY(FMySqlStmtGuard)
 
 	MYSQL_STMT* Get() const noexcept { return _Stmt; }
 	explicit operator bool() const noexcept { return _Stmt != nullptr; }
@@ -64,14 +63,6 @@ FMySqlConnection::~FMySqlConnection() noexcept
 	Close();
 }
 
-void FMySqlConnection::Close() noexcept
-{
-	if (_Handle != nullptr) {
-		mysql_close(_Handle);
-		_Handle = nullptr;
-	}
-}
-
 bool FMySqlConnection::EnsureConnected(Core::FString& outError) noexcept
 {
 	if (_Handle != nullptr) {
@@ -82,43 +73,12 @@ bool FMySqlConnection::EnsureConnected(Core::FString& outError) noexcept
 	return ConnectInternal(outError);
 }
 
-bool FMySqlConnection::ConnectInternal(Core::FString& outError) noexcept
+void FMySqlConnection::Close() noexcept
 {
-	Close();
-	_Handle = mysql_init(nullptr);
-	if (_Handle == nullptr) {
-		outError = Core::FString{ "mysql_init failed" };
-		return false;
+	if (_Handle != nullptr) {
+		mysql_close(_Handle);
+		_Handle = nullptr;
 	}
-
-	const unsigned int timeoutSec{ 5 };
-	const my_bool verifyCert{ 0 };
-	const my_bool enforceSsl{ 0 };
-	mysql_optionsv(_Handle, MYSQL_OPT_CONNECT_TIMEOUT, &timeoutSec);
-	mysql_optionsv(_Handle, MYSQL_OPT_READ_TIMEOUT, &timeoutSec);
-	mysql_optionsv(_Handle, MYSQL_OPT_WRITE_TIMEOUT, &timeoutSec);
-	mysql_optionsv(_Handle, MYSQL_SET_CHARSET_NAME, "utf8mb4");
-	mysql_optionsv(_Handle, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &verifyCert);
-	mysql_optionsv(_Handle, MYSQL_OPT_SSL_ENFORCE, &enforceSsl);
-
-	const std::string pluginDir = ResolveMysqlPluginDir();
-	if (!pluginDir.empty())
-		mysql_optionsv(_Handle, MYSQL_PLUGIN_DIR, pluginDir.c_str());
-
-	const std::string host{ _Config.Host.View() };
-	const std::string user{ _Config.User.View() };
-	const std::string pass{ _Config.Password.View() };
-	const std::string db{ _Config.Database.View() };
-
-	if (mysql_real_connect(_Handle, host.c_str(), user.c_str(), pass.c_str(),
-		db.c_str(), _Config.Port, nullptr, 0) == nullptr) {
-		const char* errText = mysql_error(_Handle);
-		outError = Core::FString{ errText ? errText : "mysql_real_connect failed" };
-		Close();
-		return false;
-	}
-
-	return true;
 }
 
 EDbRegisterStatus FMySqlConnection::RegisterAccount(const Core::STRINGVIEW username, const Core::STRINGVIEW nickname,
@@ -374,6 +334,45 @@ bool FMySqlConnection::RecordLogout(const Core::uint64 logId, const Core::uint32
 		outError = Core::FString{ mysql_stmt_error(stmt.Get()) };
 		if (errNo == 2006u || errNo == 2013u)
 			Close();
+		return false;
+	}
+
+	return true;
+}
+
+bool FMySqlConnection::ConnectInternal(Core::FString& outError) noexcept
+{
+	Close();
+	_Handle = mysql_init(nullptr);
+	if (_Handle == nullptr) {
+		outError = Core::FString{ "mysql_init failed" };
+		return false;
+	}
+
+	const unsigned int timeoutSec{ 5 };
+	const my_bool verifyCert{ 0 };
+	const my_bool enforceSsl{ 0 };
+	mysql_optionsv(_Handle, MYSQL_OPT_CONNECT_TIMEOUT, &timeoutSec);
+	mysql_optionsv(_Handle, MYSQL_OPT_READ_TIMEOUT, &timeoutSec);
+	mysql_optionsv(_Handle, MYSQL_OPT_WRITE_TIMEOUT, &timeoutSec);
+	mysql_optionsv(_Handle, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+	mysql_optionsv(_Handle, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &verifyCert);
+	mysql_optionsv(_Handle, MYSQL_OPT_SSL_ENFORCE, &enforceSsl);
+
+	const std::string pluginDir = ResolveMysqlPluginDir();
+	if (!pluginDir.empty())
+		mysql_optionsv(_Handle, MYSQL_PLUGIN_DIR, pluginDir.c_str());
+
+	const std::string host{ _Config.Host.View() };
+	const std::string user{ _Config.User.View() };
+	const std::string pass{ _Config.Password.View() };
+	const std::string db{ _Config.Database.View() };
+
+	if (mysql_real_connect(_Handle, host.c_str(), user.c_str(), pass.c_str(),
+		db.c_str(), _Config.Port, nullptr, 0) == nullptr) {
+		const char* errText = mysql_error(_Handle);
+		outError = Core::FString{ errText ? errText : "mysql_real_connect failed" };
+		Close();
 		return false;
 	}
 

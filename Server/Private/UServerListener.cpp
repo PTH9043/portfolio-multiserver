@@ -50,9 +50,9 @@ void UServerListener::HandleAcceptedSocket(Core::TCPSOCKET socket)
 		}
 	}
 
-	const auto session = Core::MakeShared<UServerSession>(coreInstance, std::move(socket), remoteIp);
+	const auto session = Core::MakeShared<UServerSession>(coreInstance, std::move(socket), std::move(remoteIp));
 	const Core::WKPTR<UServerListener> weakSelf = ThisWeak<UServerListener>();
-	const auto player = Core::MakeShared<UPlayer>(coreInstance, _NicknameRegistry, _DatabaseManager, std::move(remoteIp),
+	const auto player = Core::MakeShared<UPlayer>(coreInstance, _NicknameRegistry, _DatabaseManager,
 		[weakSelf](const Core::SHPTR<UPlayer>& disconnected) {
 			if (const auto self = weakSelf.lock())
 				self->UnregisterConnectedPlayer(disconnected);

@@ -19,20 +19,11 @@
     <ClInclude Include="..\Public\CoreStlTypes.h">
       <Filter>98.Default</Filter>
     </ClInclude>
-    <ClInclude Include="..\Public\IHashable.h">
-      <Filter>95.Interface</Filter>
-    </ClInclude>
     <ClInclude Include="..\Public\UCoreGlobal.h">
       <Filter>00.Global</Filter>
     </ClInclude>
     <ClInclude Include="..\Public\CustomAlloc.h">
       <Filter>96.Utility\Alloc</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\RunTimeMetrics.h">
-      <Filter>99.RuntimeMetric</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\MPMetrics.h">
-      <Filter>99.RuntimeMetric\MP</Filter>
     </ClInclude>
     <ClInclude Include="..\Public\CustomString.h">
       <Filter>96.Utility\String</Filter>
@@ -99,12 +90,6 @@
     <Filter Include="96.Utility\Alloc">
       <UniqueIdentifier>{aa454f75-745b-4f16-bdfb-6aeb2dd42c7c}</UniqueIdentifier>
     </Filter>
-    <Filter Include="99.RuntimeMetric">
-      <UniqueIdentifier>{d9f314ce-2b0e-496d-8877-d1c211f911ad}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="99.RuntimeMetric\MP">
-      <UniqueIdentifier>{f4fc4eac-bd7f-48e5-98d2-5c8cab3619f1}</UniqueIdentifier>
-    </Filter>
     <Filter Include="96.Utility\String">
       <UniqueIdentifier>{64c36716-6ec8-4f5f-ace5-e3d74679616c}</UniqueIdentifier>
     </Filter>
@@ -122,9 +107,6 @@
     </Filter>
     <Filter Include="01.Manager\RoomManager">
       <UniqueIdentifier>{c1e9a412-6f3b-4d8a-9b14-5c3a8e1f0d05}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="95.Interface">
-      <UniqueIdentifier>{d9429e8d-12c8-49dc-ae1a-2bb2e6792117}</UniqueIdentifier>
     </Filter>
     <Filter Include="01.Manager\Logger">
       <UniqueIdentifier>{3c3329ed-e1b0-4382-aa1b-bab83798dfd0}</UniqueIdentifier>
@@ -169,12 +151,6 @@
     </ClCompile>
     <ClCompile Include="..\Private\CustomAlloc.cpp">
       <Filter>96.Utility\Alloc</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\RunTimeMetrics.cpp">
-      <Filter>99.RuntimeMetric</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\MPMetrics.cpp">
-      <Filter>99.RuntimeMetric\MP</Filter>
     </ClCompile>
     <ClCompile Include="..\Private\Packet.cpp">
       <Filter>96.Utility\packet</Filter>

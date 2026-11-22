@@ -279,10 +279,4 @@ inline EChatTextError ValidateChatText(Core::STRINGVIEW text) noexcept
 	return charCount >= CHAT_MIN_CHARS ? EChatTextError::None : EChatTextError::Empty;
 }
 
-// 채팅 본문 규칙: 유효한 UTF-8 1~200자.
-inline bool IsValidChatText(Core::STRINGVIEW text) noexcept
-{
-	return ValidateChatText(text) == EChatTextError::None;
-}
-
 SPACE_T

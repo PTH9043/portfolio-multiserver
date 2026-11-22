@@ -65,8 +65,6 @@ UMemoryHeader* UMemoryPool::Pop()
 	if (_CentralQueue.try_pop(mHeader))
 	{
 		_QueuedBlockCount.fetch_sub(1, std::memory_order_relaxed);
-		// MemoryCentralQueueHit는 중앙 큐에서 블록을 가져온 횟수
-		RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemoryCentralQueueHit);
 		return mHeader;
 	}
 
@@ -75,8 +73,6 @@ UMemoryHeader* UMemoryPool::Pop()
 	{
 		throw std::bad_alloc{};
 	}
-	// MemorySystemAllocation은 스레드 캐시와 중앙 큐를 거치지 않고 시스템에서 직접 할당한 횟수
-	RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemorySystemAllocation);
 	return ::new (memory) UMemoryHeader{};
 }
 
@@ -229,21 +225,13 @@ void* UMemoryAdiminstor::Allocate(const uint64 size)
 		void* memory{ std::malloc(static_cast<std::size_t>(allocSize)) };
 		THROW_INVALID_COND(nullptr == memory, std::bad_alloc{});
 
-		// MemorySystemAllocation은 스레드 캐시와 중앙 큐를 거치지 않고 시스템에서 직접 할당한 횟수
-		RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemorySystemAllocation);
-
 		pMemoryHeader = ::new (memory) UMemoryHeader{};
 	}
 	else
 	{
 		UMemoryPool* pMemoryPool{ _PoolTable[allocSize] };
 		pMemoryHeader = GThreadMemoryCache.TryPop(pMemoryPool);
-		if (nullptr != pMemoryHeader)
-		{
-			// MemoryThreadCacheHit는 스레드 캐시에서 블록을 가져온 횟수
-			RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemoryThreadCacheHit);
-		}
-		else
+		if (nullptr == pMemoryHeader)
 		{
 			pMemoryHeader = pMemoryPool->Pop();
 		}
@@ -270,11 +258,8 @@ void UMemoryAdiminstor::Release(void* ptr)
 	UMemoryPool* pMemoryPool{ _PoolTable[allocSize] };
 	if (true == GThreadMemoryCache.TryPush(pMemoryPool, pMemoryHeader))
 	{
-		// MemoryReturnedToThreadCache는 스레드 캐시에 반환한 횟수
-		RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemoryReturnedToThreadCache);
 		return;
 	}
-	RECORD_RUNTIME_METRIC(Metrics::EMemoryPoolMetricIndex::MemoryReturnedToCentralQueue);
 	pMemoryPool->Push(pMemoryHeader);
 }
 

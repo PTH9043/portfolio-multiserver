@@ -43,16 +43,6 @@ SHPTR<const BUFFER> USession::MakePacketBuffer(const void* data, uint64 packetSi
     return framedBuffer;
 }
 
-uint64 USession::GetHash() const noexcept
-{
-    return static_cast<uint64>(std::hash<const USession*>{}(this));
-}
-
-bool USession::IsEqual(const USession& other) const noexcept
-{
-    return this == &other;
-}
-
 // 유휴 수신 타임아웃(ms)을 설정한다(0 이하이면 비활성화).
 void USession::SetIdleTimeout(const MILLISECONDS timeout) noexcept
 {
@@ -158,10 +148,6 @@ bool USession::PostToSession(FUNC<void()> task)
     return true;
 }
 
-void USession::OnDisconnected()
-{
-}
-
 void USession::ProcessingData(const FPacketView& packet)
 {
     RUNTIME_TRACE_SCOPE(USession, ProcessingData, GetRuntimeTraceID());
@@ -253,7 +239,6 @@ void USession::CloseConnection()
 
     if (!_DisconnectedNotified) {
         _DisconnectedNotified = true;
-        OnDisconnected();
         if (const auto owner = GetOwner())
             owner->OnSessionDisconnected();
     }

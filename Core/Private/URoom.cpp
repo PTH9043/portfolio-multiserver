@@ -3,7 +3,6 @@
 #include "UActor.h"
 #include "USession.h"
 #include <boost/asio/post.hpp>
-#include <cstring>
 #include <utility>
 
 #include "RuntimeTrace.h"
@@ -75,21 +74,6 @@ bool URoom::RequestLeaveWithCallback(const SHPTR<UActor>& actor, FUNC<void(bool)
     return true;
 }
 
-// 송신 프레임을 1회만 조립해 방 strand에서 전체 액터에게 공유 전송한다.
-void URoom::RequestBroadcast(const void* data, uint64 packetSize, uint16 packetType)
-{
-    RUNTIME_TRACE_SCOPE(URoom, RequestBroadcast, GetRuntimeTraceID());
-    const auto framedBuffer = USession::MakePacketBuffer(data, packetSize, packetType);
-    if (!framedBuffer)
-        return;
-
-    const auto submission = RUNTIME_TRACE_EVENT(Submit, URoom, RequestBroadcast, GetRuntimeTraceID());
-    ASIO::post(_Strand, [room = ThisShared<URoom>(), framedBuffer, submission] {
-        RUNTIME_TRACE_CALLBACK(URoom, RequestBroadcast, room->GetRuntimeTraceID(), submission);
-        room->BroadcastSharedOnStrand(framedBuffer);
-    });
-}
-
 // 임의 작업을 이 방의 strand로 직렬화 게시한다(실행 중 방 수명 유지).
 bool URoom::PostToRoom(FUNC<void()> task)
 {
@@ -106,7 +90,7 @@ bool URoom::PostToRoom(FUNC<void()> task)
     return true;
 }
 
-// 방 strand 안에서 중복·정원·도메인 조건을 검사한 뒤 액터를 O(1) 등록한다.
+// 방 strand 안에서 중복·정원을 검사한 뒤 액터를 O(1) 등록한다.
 bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, TryEnterOnStrand, GetRuntimeTraceID());
@@ -115,8 +99,6 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
     if (_ActorIndexMap.contains(actor.get()))
         return false;
     if (_ActorContainer.size() >= _MaxActorCount)
-        return false;
-    if (!CanEnter(actor))
         return false;
 
     // 벡터 공간을 먼저 확보하고 인덱스 맵을 갱신한 뒤 push_back해 할당 예외 시 일관성을 유지한다.
@@ -190,12 +172,6 @@ void URoom::BroadcastSharedOnStrand(const SHPTR<const BUFFER>& framedBuffer, con
         if (const auto session = actor->GetSession())
             session->SendShared(framedBuffer);
     }
-}
-
-bool URoom::CanEnter(const SHPTR<UActor>& actor) const
-{
-    (void)actor;
-    return true;
 }
 
 void URoom::OnActorEntered(const SHPTR<UActor>& actor)

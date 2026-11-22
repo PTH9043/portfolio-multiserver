@@ -35,9 +35,6 @@ protected:
 	// 현재 장착된 소유자 UActor를 돌려준다. 장착 전이거나 소유자가 소멸했으면 빈 포인터다.
 	SHPTR<UActor> GetOwner() const noexcept { return _Owner.lock(); }
 
-	// 소유자 UActor에 장착된 직후 한 번 호출된다. 파생 컴포넌트가 초기 바인딩이 필요할 때 재정의한다.
-	virtual void OnAttached(const SHPTR<UActor>& owner);
-
 private:
 	NO_COPY(UComponent)
 

@@ -24,14 +24,11 @@
     <ClInclude Include="..\Public\CoreDefine.h" />
     <ClInclude Include="..\Public\CoreMacro.h" />
     <ClInclude Include="..\Public\CoreStlTypes.h" />
-    <ClInclude Include="..\Public\IHashable.h" />
     <ClInclude Include="..\Public\CustomAlloc.h" />
     <ClInclude Include="..\Public\CoreTypes.h" />
     <ClInclude Include="..\Public\CustomString.h" />
     <ClInclude Include="..\Public\CustomMemory.h" />
-    <ClInclude Include="..\Public\MPMetrics.h" />
     <ClInclude Include="..\Public\Packet.h" />
-    <ClInclude Include="..\Public\RunTimeMetrics.h" />
     <ClInclude Include="..\Public\UCoreGlobal.h" />
     <ClInclude Include="..\Public\UCoreInstance.h" />
     <ClInclude Include="..\Public\ULogger.h" />
@@ -51,9 +48,7 @@
     <ClCompile Include="..\Private\RuntimeTrace.cpp" />
     <ClCompile Include="..\Private\CustomAlloc.cpp" />
     <ClCompile Include="..\Private\CustomMemory.cpp" />
-    <ClCompile Include="..\Private\MPMetrics.cpp" />
     <ClCompile Include="..\Private\Packet.cpp" />
-    <ClCompile Include="..\Private\RunTimeMetrics.cpp" />
     <ClCompile Include="..\Private\UCoreGlobal.cpp" />
     <ClCompile Include="..\Private\UCoreInstance.cpp" />
     <ClCompile Include="..\Private\ULogger.cpp" />

@@ -41,7 +41,7 @@
 ## 2. 핵심 설계 의사결정 5가지
 
 1. **방 내부 무잠금 Strand 직렬화 (`Core::URoom` / `Server::UGameRoom`)**
-   - 방별 `ASIO::strand`에서 액터 컨테이너(`_ActorContainer`, O(1) swap-and-pop 인덱스 맵)와 닉네임 인덱스(`_NicknameIndex`)를 전담 처리해 **방 내부 `mutex`를 0개로 제거**했습니다.
+   - 방별 `ASIO::strand`에서 액터 컨테이너(`_ActorContainer`, O(1) swap-and-pop 인덱스 맵)를 전담 처리해 **방 내부 `mutex`를 0개로 제거**하고, 서버 전역 닉네임 유일성은 `UNicknameRegistry`로 분리했습니다.
    - `Core::URoomManager`는 런타임 방 삭제를 허용하지 않는 Append-Only 정책으로 단일 `CONUNORMAP` 조회/등록을 무잠금으로 수행합니다.
 2. **브로드캐스트 O(N) → O(1) 공유 프레임 + Scatter-Gather + 25ms 인원 병합**
    - `USession::MakePacketBuffer`로 `[4B 헤더 + 직렬화 본문]` 불변 버퍼를 1회만 생성하고 `SendShared` / `BroadcastSharedOnStrand`로 N명 세션에 공유합니다.

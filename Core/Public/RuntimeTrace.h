@@ -62,7 +62,6 @@ private:
 CORE_TRACE_API uint64 RecordRuntimeTrace(ERuntimeTraceEvent kind, uint64 object, FRuntimeTraceSite site) noexcept;
 // FlightRecorder 모드에서는 링버퍼를 .cvtrace로 덤프하고, AsyncStream 모드에서는 대기 배치를 즉시 플러시한다.
 CORE_TRACE_API bool TriggerRuntimeTraceDump() noexcept;
-CORE_TRACE_API ERuntimeTraceMode GetRuntimeTraceMode() noexcept;
 // 현재 스레드의 활성 계측 순번·객체 ID·OS 스레드 ID를 돌려준다.
 CORE_TRACE_API uint64 GetCurrentRuntimeTraceSeq() noexcept;
 CORE_TRACE_API uint64 GetCurrentRuntimeTraceObject() noexcept;
@@ -89,7 +88,6 @@ inline FRuntimeTraceID::FRuntimeTraceID() noexcept : _Value{} {}
 inline FRuntimeTraceID::FRuntimeTraceID(const FRuntimeTraceID&) noexcept : FRuntimeTraceID{} {}
 inline uint64 RecordRuntimeTrace(ERuntimeTraceEvent, uint64, FRuntimeTraceSite) noexcept { return 0; }
 inline bool TriggerRuntimeTraceDump() noexcept { return false; }
-inline ERuntimeTraceMode GetRuntimeTraceMode() noexcept { return ERuntimeTraceMode::Off; }
 inline uint64 GetCurrentRuntimeTraceSeq() noexcept { return 0; }
 inline uint64 GetCurrentRuntimeTraceObject() noexcept { return 0; }
 inline uint32 GetCurrentRuntimeTraceThreadID() noexcept { return 0; }

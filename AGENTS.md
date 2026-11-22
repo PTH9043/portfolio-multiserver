@@ -110,7 +110,7 @@
 | 클래스 | `U` 접두사 + PascalCase | `UListener`, `ULogger`, `UServerApp` |
 | 구조체 | `F` 접두사 | `FLogRecord`, `FNetworkWorkerData`, `FHandlers` |
 | 열거형 | `E` 접두사, `enum class`. 기반 타입(`uint8` 등)을 주는 경우가 많다 | `enum class ELogLevel : uint8` |
-| 인터페이스 | `I` 접두사 + `abstract` | `IRuntimeMetrics` |
+| 인터페이스 | `I` 접두사 + `abstract` | (필요 시 선언) |
 | 전역 접근 | `G` 접두사 | `GCoreGlobal`, `GMemory`, `GThreadMemoryCache` |
 | 함수 | PascalCase, 동사로 시작 | `Start`, `RequestStop`, `TryLog`, `GetLocalEndpoint` |
 | class 멤버 변수 | `_` + PascalCase | `_Acceptor`, `_Running`, `_CoreInstance` |
@@ -124,15 +124,15 @@
 - `Get…`이 참조를 반환하면 반환한 참조를 쓰는 동안 소유 객체가 살아 있어야 한다는 조건을 주석으로 적는다.
 - 예외의 예:
   - 이름: `_bRunning`, `_idIssuance`, `_allocSize`, `FPacketHeader`의 `type`·`size`, `UThreadManager`의 `Work`·`Data`·`CurrentThreadID`·`Thread`, `UNetworkManager::RunWorker(void* Data)`, 메모리 풀 코드의 `pMemoryPool`·`mHeader`·`eMemoryPoolMetricIndex`.
-  - 접두사: 이름은 `F`이지만 class인 `FWorkerLogChannel`, `U`가 없는 클래스 템플릿 `CustomString`, 배열 색인을 위해 `enum class`가 아닌 `EMemoryPoolMetricIndex`, 기반 타입이 없는 `EStopState`·`EResult`.
-  - 별칭: 클래스 안의 `F` 접두사 별칭 `FOnFailure`·`FNotify`, 문자열 타입 `FString`·`FWString`.
+  - 접두사: 이름은 `F`이지만 class인 `FWorkerLogChannel`, `U`가 없는 클래스 템플릿 `CustomString`, 기반 타입이 없는 `EStopState`·`EResult`.
+  - 별칭: 클래스 안의 `F` 접두사 별칭 `FOnFailure`·`FNotify`, 문자열 타입 `FString`.
   - 형태: `final`이 아닌 `UAllocator`, `explicit`이 아닌 `UObject` 생성자, `ATOMIC_BOOL` 대신 `ATOMIC<bool>`을 쓴 `ServerApp.h`.
 
 ### 타입과 메모리
 
 - 정수는 `int8`~`uint64`, 바이트는 `uint8`, 바이트 버퍼는 `BUFFER`(`VECTOR<uint8>`)를 쓴다. 문자열 보기는 `STRINGVIEW`, 시각은 `TIMEPOINT_STEADY_CLOCK`·`TIMEPOINT_SYSTEM_CLOCK`, 원자 변수는 `ATOMIC<T>`·`ATOMIC_BOOL`·`ATOMIC_UINT64`를 쓴다.
 - 예외 전달에는 `EXPECTION_PTR`, 표준 시스템 오류에는 `ERROR_CODE`, Boost 오류에는 `BOOST_ERROR_CODE`를 쓴다.
-- `VECTOR`, `LIST`, `QUEUE`, `MAP`, `CONQUEUE` 등은 메모리 풀 할당자를 쓴다. 메모리 풀과 런타임 계측 내부는 풀이 자기 자신을 호출하지 않도록 `std::`, `concurrency::` 컨테이너를 직접 쓴다.
+- `VECTOR`, `DEQUE`, `LIST`, `UNORMAP`, `UNORSET`, `CONQUEUE`, `CONUNORMAP` 등은 메모리 풀 할당자를 쓴다. 메모리 풀과 런타임 계측 내부는 풀이 자기 자신을 호출하지 않도록 `std::`, `concurrency::` 컨테이너를 직접 쓴다.
 - 타입 별칭은 여러 곳에서 반복하거나 공통 의미가 있는 타입에만 둔다. 한 클래스에서만 쓰는 콜백은 `FUNC<void(EXPECTION_PTR)>`처럼 선언 위치에서 인자와 반환형이 보이게 쓴다. 2026-11-12 별칭 정리 때 `LOG_RECORD_HANDLER` 등을, 2026-11-14 ULogger 정리 때 멤버 하나에만 쓰던 `LOGQUEUE`를 이 기준으로 없앴다. 이후 AI가 `UListener`에 추가한 `FOnFailure`는 이 기준에 맞는지 다시 검토할 대상이다.
 - Core 객체는 `MakeShared<T>()`로 만들고, 생성자는 `explicit T(SHPTR<UCoreInstance> coreInstance)` 형태로 부모에 전달한다. 자기 참조는 `ThisShared<T>()`, 비동기 람다에 붙잡을 때는 순환 참조를 피하려고 `ThisWeak<T>()`를 쓴다.
 - 프로세스 전체에 하나만 있는 기반 객체(`UCoreGlobal`)는 `DECLARE_INSTANCE`/`IMPLEMENT_INSTANCE` 또는 `DECLARE_SHARED_INSTANCE`/`IMPLEMENT_SHARED_INSTANCE`로 만든다. 매니저는 싱글턴으로 만들지 않고 `UCoreInstance`가 소유한다.

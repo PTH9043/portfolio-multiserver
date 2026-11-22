@@ -39,7 +39,6 @@ public:
 	explicit UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance,
 		Core::SHPTR<UNicknameRegistry> nicknameRegistry = nullptr,
 		Core::SHPTR<UDatabaseManager> databaseManager = nullptr,
-		Core::FString remoteIp = Core::FString{ "127.0.0.1" },
 		FDisconnectCleanupCallback onDisconnectedCleanup = nullptr);
 	virtual ~UPlayer() override;
 	NO_COPY(UPlayer)
@@ -88,13 +87,18 @@ private:
 	void OnRollbackPreviousRoomCompleted(const Core::SHPTR<UGameRoom>& previousRoom,
 		UGameRoom::EEnterResult result, Core::uint32 userCount);
 
+	// 장착된 UServerSession에서 원격 IP를 단일 출처로 조회한다(미장착 시 기본 루프백 반환).
+	Core::FString GetSessionRemoteIp() const;
+
+	// DB 접속 이력의 로그아웃 기록을 원자 플래그로 정확히 한 번만 큐에 적재한다.
+	void EnqueueLogoutOnce(Core::uint32 roomId, Core::STRINGVIEW reason) noexcept;
+
 	// 예약된 전역 닉네임을 정확히 한 번만 해제한다(퇴장 시 즉시 해제, 소멸자 RAII 안전망 겸용).
 	void ReleaseNicknameOnce() noexcept;
 
 	FPlayerInfo _Info;
 	Core::SHPTR<UNicknameRegistry> _NicknameRegistry;
 	Core::SHPTR<UDatabaseManager> _DatabaseManager;
-	Core::FString _RemoteIp;
 	FDisconnectCleanupCallback _OnDisconnectedCleanup;
 	Core::ATOMIC_BOOL _NicknameReserved{ false };
 	Core::ATOMIC_BOOL _LogoutRecorded{ false };

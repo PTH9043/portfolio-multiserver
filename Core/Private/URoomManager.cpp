@@ -69,11 +69,4 @@ void URoomManager::ClearRooms()
 	_RoomContainer.clear();
 }
 
-// 현재 등록된 방 개수를 돌려준다.
-uint64 URoomManager::GetRoomCount() const noexcept
-{
-	RUNTIME_TRACE_SCOPE(URoomManager, GetRoomCount, GetRuntimeTraceID());
-	return static_cast<uint64>(_RoomContainer.size());
-}
-
 SPACE_T

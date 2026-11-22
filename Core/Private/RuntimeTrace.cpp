@@ -586,11 +586,6 @@ bool TriggerRuntimeTraceDump() noexcept
     return ok;
 }
 
-ERuntimeTraceMode GetRuntimeTraceMode() noexcept
-{
-    return activeMode.load(std::memory_order_acquire);
-}
-
 uint64 GetCurrentRuntimeTraceSeq() noexcept
 {
     return currentScope;
