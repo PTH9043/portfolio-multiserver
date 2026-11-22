@@ -1,9 +1,18 @@
 #include "UPawn.h"
+#include "UCoreInstance.h"
+#include "ULogger.h"
+#include "USession.h"
 
+#include "packet_type.pb.h"
+#include "room.pb.h"
+
+#include <string>
 #include <utility>
 
 #include "RuntimeTrace.h"
 #define RUNTIME_TRACE_SOURCE "Server/Private/UPawn.cpp"
+
+namespace Protocol = multiplayer::protocol;
 
 SPACE_H(Server)
 
@@ -18,43 +27,66 @@ UPawn::~UPawn()
 	RUNTIME_TRACE_EVENT(Destroy, UPawn, ~UPawn, GetRuntimeTraceID());
 }
 
-// 타입 검사를 통과한 컴포넌트를 유형 ID 슬롯에 등록하고 소유자(_Owner)를 연결한다.
-bool UPawn::AddComponentInternal(const Core::SHPTR<UComponent>& component)
+// 모든 통신 사물에서 공통으로 허용되는 CS_PING 하트비트를 선처리하고 나머지는 파생 OnDomainPacket으로 내려보낸다.
+void UPawn::OnReceivePacket(const Core::FPacketView& packet)
 {
-	RUNTIME_TRACE_SCOPE(UPawn, AddComponentInternal, GetRuntimeTraceID());
-	if (!component)
-		return false;
+	RUNTIME_TRACE_SCOPE(UPawn, OnReceivePacket, GetRuntimeTraceID());
+	if (packet.GetType() == Protocol::CS_PING) {
+		HandlePacket<Protocol::CSPing>(packet, [this](const Protocol::CSPing& ping) {
+			Protocol::SCPong response;
+			response.set_client_time_ms(ping.client_time_ms());
+			SendPacket(Protocol::SC_PONG, response);
+		});
+		return;
+	}
 
-	const Core::uint32 typeID{ component->GetComponentTypeID() };
-	if (typeID == static_cast<Core::uint32>(EComponentType::None) || component->HasOwner())
-		return false;
-
-	const auto self = ThisWeak<UPawn>().lock();
-	if (!self)
-		return false;
-
-	// 이미 같은 유형이 등록돼 있으면 삽입·소유자 변경 전에 빠르게 거절한다.
-	if (_ComponentContainer.find(typeID) != _ComponentContainer.end())
-		return false;
-
-	const auto [it, inserted] = _ComponentContainer.insert({ typeID, component });
-	(void)it;
-	if (!inserted)
-		return false;
-
-	return component->AttachToOwner(self);
+	OnDomainPacket(packet);
 }
 
-// 유형 ID로 등록된 컴포넌트를 잠금 없이 O(1) 조회한다.
-Core::SHPTR<UComponent> UPawn::FindComponent(const Core::uint32 typeID) const
+// 프로토콜 위반 사유를 Warning으로 기록하고 장착된 세션을 즉시 닫는다.
+void UPawn::RejectPacket(const Core::uint16 packetType, const Core::STRINGVIEW reason)
 {
-	if (typeID == static_cast<Core::uint32>(EComponentType::None))
-		return nullptr;
+	RUNTIME_TRACE_SCOPE(UPawn, RejectPacket, GetRuntimeTraceID());
+	OnPacketRejected();
+	const auto coreInstance = GetCoreInstance();
+	const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+	if (logger) {
+		Core::FString message{ GetPawnTypeName() };
+		message << " rejected packet type " << std::to_string(packetType)
+				<< " (" << reason << "); closing the connection";
+		logger->TryLog(Core::ELogLevel::Warning, message.View());
+	}
+	if (const auto session = GetSession())
+		session->Close();
+}
 
-	const auto it = _ComponentContainer.find(typeID);
-	if (it == _ComponentContainer.end())
-		return nullptr;
-	return it->second;
+void UPawn::SendRawFrame(const Core::uint16 packetType, const void* data, const Core::uint64 bodySize)
+{
+	if (const auto session = GetSession())
+		session->Send(data, bodySize, packetType);
+}
+
+void UPawn::LogOversizedOutgoingPacket(const Core::uint16 packetType, const Core::uint64 bodySize) const
+{
+	const auto coreInstance = GetCoreInstance();
+	const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+	if (!logger)
+		return;
+	Core::FString message{ GetPawnTypeName() };
+	message << " skipped oversized packet type " << std::to_string(packetType)
+			<< " (" << std::to_string(bodySize) << " bytes)";
+	logger->TryLog(Core::ELogLevel::Warning, message.View());
+}
+
+void UPawn::LogSerializeFailure(const Core::uint16 packetType) const
+{
+	const auto coreInstance = GetCoreInstance();
+	const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
+	if (!logger)
+		return;
+	Core::FString message{ GetPawnTypeName() };
+	message << " failed to serialize packet type " << std::to_string(packetType);
+	logger->TryLog(Core::ELogLevel::Warning, message.View());
 }
 
 SPACE_T

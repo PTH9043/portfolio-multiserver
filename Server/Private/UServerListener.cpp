@@ -1,8 +1,8 @@
 #include "UServerListener.h"
-#include "UAuthHandler.h"
+#include "UPlayer.h"
+#include "UServerSession.h"
 #include "UCoreInstance.h"
 #include "UNetworkManager.h"
-#include "USession.h"
 
 #include <utility>
 
@@ -27,7 +27,7 @@ UServerListener::~UServerListener()
 	RUNTIME_TRACE_EVENT(Destroy, UServerListener, ~UServerListener, GetRuntimeTraceID());
 }
 
-// 새 TCP 연결을 순수 Core::USession으로 감싸고 초기 미인증 핸들러(UAuthHandler)를 바인딩한 뒤 수신을 시작한다.
+// 새 TCP 연결을 UServerSession(UComponent)으로 감싸 UPlayer(UActor)에 장착하고 수신을 시작한다.
 void UServerListener::HandleAcceptedSocket(Core::TCPSOCKET socket)
 {
 	RUNTIME_TRACE_SCOPE(UServerListener, HandleAcceptedSocket, GetRuntimeTraceID());
@@ -50,14 +50,33 @@ void UServerListener::HandleAcceptedSocket(Core::TCPSOCKET socket)
 		}
 	}
 
-	const auto session = Core::MakeShared<Core::USession>(coreInstance, std::move(socket));
-	const auto authHandler = Core::MakeShared<UAuthHandler>(
-		coreInstance, session, _NicknameRegistry, _DatabaseManager, std::move(remoteIp));
-	session->SetHandler(authHandler);
+	const auto session = Core::MakeShared<UServerSession>(coreInstance, std::move(socket), remoteIp);
+	const Core::WKPTR<UServerListener> weakSelf = ThisWeak<UServerListener>();
+	const auto player = Core::MakeShared<UPlayer>(coreInstance, _NicknameRegistry, _DatabaseManager, std::move(remoteIp),
+		[weakSelf](const Core::SHPTR<UPlayer>& disconnected) {
+			if (const auto self = weakSelf.lock())
+				self->UnregisterConnectedPlayer(disconnected);
+		});
+	if (!player->AddComponent(session))
+		return;
+
+	{
+		Core::EXCLUSIVE_LOCK_GUARD lock{ _PlayerMutex };
+		_ConnectedPlayerContainer.insert(player);
+	}
+
 	session->SetIdleTimeout(_SessionIdleTimeout);
 	// 등록을 먼저 게시해야 수신이 바로 끝나 Close가 게시하는 목록 제거가 등록 뒤에 실행된다.
 	networkManager->RequestAddSession(session);
 	session->Receive();
+}
+
+void UServerListener::UnregisterConnectedPlayer(const Core::SHPTR<UPlayer>& player) noexcept
+{
+	if (!player)
+		return;
+	Core::EXCLUSIVE_LOCK_GUARD lock{ _PlayerMutex };
+	_ConnectedPlayerContainer.erase(player);
 }
 
 SPACE_T

@@ -1,7 +1,7 @@
 #include "CoreDefine.h"
-#include "ISessionHandler.h"
 #include "Packet.h"
 #include "UActor.h"
+#include "UComponent.h"
 #include "UCoreInstance.h"
 #include "UListener.h"
 #include "ULogger.h"
@@ -31,7 +31,7 @@ static_assert(!std::is_copy_assignable_v<FPacketView>, "FPacketView must not be 
 static_assert(!std::is_move_constructible_v<FPacketView>, "FPacketView must not be move constructible");
 static_assert(!std::is_move_assignable_v<FPacketView>, "FPacketView must not be move assignable");
 static_assert(std::is_copy_constructible_v<FPacketPayload>, "FPacketPayload must be copy constructible");
-static_assert(std::is_move_constructible_v<FPacketPayload>, "FPacketPayload must be move assignable");
+static_assert(std::is_move_constructible_v<FPacketPayload>, "FPacketPayload must be move constructible");
 
 namespace {
 void Require(const bool condition, const char* message)
@@ -54,7 +54,15 @@ BUFFER BuildWireFrame(const uint16 type, const uint16 declaredSize, const uint8*
 	return out;
 }
 
-// ---- Group 3 테스트용 파생 타입 (TypeID + static_cast 계약 검증) ----
+// ---- Group 2/3 테스트용 파생 타입 (UComponent -> UActor 장착 + TypeID static_cast 검증) ----
+
+class UTestCustomComponent final : public UComponent {
+public:
+	STATIC_CONSTEXPR uint32 ComponentTypeID{ static_cast<uint32>(EComponentType::UserStart) };
+	explicit UTestCustomComponent(SHPTR<UCoreInstance> coreInstance)
+		: UComponent{ std::move(coreInstance) } {}
+	uint32 GetComponentTypeID() const noexcept override { return ComponentTypeID; }
+};
 
 class UTestActor final : public UActor {
 public:
@@ -80,89 +88,50 @@ public:
 	uint32 GetRoomTypeID() const noexcept override { return RoomTypeID; }
 };
 
-// ---- Group 2/4 네트워크 테스트용 ISessionHandler · 리스너 ----
+// ---- Group 4 네트워크 테스트용 USession(UComponent) + UProbeActor(UActor) ----
 
 struct FSessionProbeState {
 	SHARED_MUTEX Lock;
 	COND_VARIABLE Changed;
 	VECTOR<FPacketPayload> ReceivedPackets;
-	VECTOR<FPacketPayload> SwappedPackets;
-	uint64 InitialDisconnectedCount{ 0 };
-	uint64 SwappedDisconnectedCount{ 0 };
+	uint64 DisconnectedCount{ 0 };
 	bool ThrowOnPacket{ false };
-	bool SwapOnType50{ false };
-	SHPTR<USession> LastAcceptedSession;
+	VECTOR<SHPTR<UActor>> AcceptedActors;
 };
 
-class USwappedProbeHandler final : public UObject, public ISessionHandler {
+class UProbeActor final : public UActor {
 public:
-	USwappedProbeHandler(SHPTR<UCoreInstance> coreInstance, FSessionProbeState& state)
-		: UObject{ std::move(coreInstance) },
+	STATIC_CONSTEXPR uint32 ActorTypeID{ static_cast<uint32>(EActorType::UserStart) + 1 };
+	UProbeActor(SHPTR<UCoreInstance> coreInstance, FSessionProbeState& state)
+		: UActor{ std::move(coreInstance) },
 		  _State{ state } {}
 
-	void OnReceivePacket(const FPacketView& packet) override
-	{
-		{
-			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
-			_State.SwappedPackets.push_back(packet.Detach());
-		}
-		_State.Changed.notify_all();
-	}
-
-	void OnSessionDisconnected() override
-	{
-		{
-			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
-			++_State.SwappedDisconnectedCount;
-		}
-		_State.Changed.notify_all();
-	}
-
-private:
-	FSessionProbeState& _State;
-};
-
-class UInitialProbeHandler final : public UObject, public ISessionHandler {
-public:
-	UInitialProbeHandler(SHPTR<UCoreInstance> coreInstance, SHPTR<USession> session, FSessionProbeState& state)
-		: UObject{ std::move(coreInstance) },
-		  _Session{ std::move(session) },
-		  _State{ state } {}
+	uint32 GetActorTypeID() const noexcept override { return ActorTypeID; }
 
 	void OnReceivePacket(const FPacketView& packet) override
 	{
 		bool shouldThrow{ false };
-		bool shouldSwap{ false };
 		{
 			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
 			shouldThrow = _State.ThrowOnPacket;
-			shouldSwap = _State.SwapOnType50 && packet.GetType() == 50;
 			if (!shouldThrow)
 				_State.ReceivedPackets.push_back(packet.Detach());
 		}
 		_State.Changed.notify_all();
 		if (shouldThrow)
 			throw std::runtime_error("probe packet exception");
-
-		if (shouldSwap) {
-			if (const auto session = _Session.lock()) {
-				const auto nextHandler = MakeShared<USwappedProbeHandler>(GetCoreInstance(), _State);
-				session->SetHandler(nextHandler);
-			}
-		}
 	}
 
 	void OnSessionDisconnected() override
 	{
 		{
 			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
-			++_State.InitialDisconnectedCount;
+			++_State.DisconnectedCount;
 		}
 		_State.Changed.notify_all();
 	}
 
 private:
-	WKPTR<USession> _Session;
 	FSessionProbeState& _State;
 };
 
@@ -182,12 +151,13 @@ protected:
 			return;
 
 		const auto session = MakeShared<USession>(coreInstance, std::move(socket));
-		const auto handler = MakeShared<UInitialProbeHandler>(coreInstance, session, _State);
-		session->SetHandler(handler);
+		const auto actor = MakeShared<UProbeActor>(coreInstance, _State);
+		if (!actor->AddComponent(session))
+			return;
 		session->SetIdleTimeout(_IdleTimeout);
 		{
 			EXCLUSIVE_LOCK_GUARD lock{ _State.Lock };
-			_State.LastAcceptedSession = session;
+			_State.AcceptedActors.push_back(actor);
 		}
 		_State.Changed.notify_all();
 		networkManager->RequestAddSession(session);
@@ -262,70 +232,28 @@ void TestSafeGuardContracts()
 	std::cout << "PASS Group 1: SafeGuard FPacketView/FPacketPayload contracts\n";
 }
 
-// Group 2: USession ISessionHandler 원자 교체(SetHandler) 및 종료 1회 통지 계약
-void TestSessionHandlerSwapContracts()
+// Group 2: Core::UComponent / Core::UActor 컴파일 타임 static 장착·중복 거절·소멸 후 재장착 계약
+void TestComponentStaticContracts()
 {
 	auto coreInstance = MakeShared<UCoreInstance>();
 	Require(coreInstance->Initialize(), "CoreInstance init failed");
-	auto networkManager = coreInstance->GetNetworkManager();
-	auto& ioContext = networkManager->GetIOContext();
 
-	FSessionProbeState state;
-	state.SwapOnType50 = true;
-	auto listener = MakeShared<UProbeListener>(coreInstance, ioContext, state, MILLISECONDS{ 0 });
-	BOOST_ERROR_CODE ec;
-	const uint16 port = PickFreeLoopbackPort();
-	Require(port != 0, "Invalid listener port");
-	Require(networkManager->StartListener(listener, TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
-		[](const BOOST_ERROR_CODE&) {}, ec), "StartListener failed");
+	auto actorA = MakeShared<UTestActor>(coreInstance);
+	auto actorB = MakeShared<UTestActor>(coreInstance);
+	auto comp1 = MakeShared<UTestCustomComponent>(coreInstance);
+	auto comp2 = MakeShared<UTestCustomComponent>(coreInstance);
 
-	THREAD worker{ [&ioContext]() { ioContext.run(); } };
-	auto shutdownAll = [&]() {
-		networkManager->Shutdown();
-		if (worker.joinable())
-			worker.join();
-	};
+	Require(actorA->AddComponent(comp1) && comp1->HasOwner(), "AddComponent failed");
+	Require(!actorA->AddComponent(comp2) && !comp2->HasOwner(), "Duplicate slot must be rejected");
+	Require(!actorB->AddComponent(comp1), "Already-owned component must be rejected");
+	Require(actorA->GetComponent<UTestCustomComponent>() == comp1, "static_pointer_cast GetComponent mismatch");
+	Require(actorA->GetSession() == nullptr, "Actor without session must return nullptr");
 
-	try {
-		IOCONTEXT clientIo;
-		const TCP_ENDPOINT ep{ ASIO::ip::address_v4::loopback(), port };
-		TCPSOCKET sock{ clientIo };
-		sock.connect(ep);
-
-		// 첫 패킷(type=50)에서 SetHandler(Swapped) 실행 → 같은 TCP 버퍼에 이어 붙은 둘째 패킷(type=51)은 새 핸들러가 받아야 한다.
-		const BUFFER swapPkt = BuildWireFrame(50, 0, nullptr, 0);
-		const char msg[] = "After";
-		const BUFFER nextPkt = BuildWireFrame(51, 5, reinterpret_cast<const uint8*>(msg), 5);
-		BUFFER merged;
-		merged.insert(merged.end(), swapPkt.begin(), swapPkt.end());
-		merged.insert(merged.end(), nextPkt.begin(), nextPkt.end());
-		ASIO::write(sock, ASIO::buffer(merged.data(), merged.size()));
-
-		{
-			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
-			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.SwappedPackets.size() == 1; }),
-				"Swapped handler did not receive subsequent packet");
-			Require(state.ReceivedPackets.size() == 1 && state.ReceivedPackets[0].GetType() == 50,
-				"Initial handler packet count mismatch");
-			Require(state.SwappedPackets[0].GetType() == 51 && state.SwappedPackets[0].GetSize() == 5,
-				"Swapped handler packet mismatch");
-		}
-
-		sock.close();
-		{
-			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
-			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.SwappedDisconnectedCount == 1; }),
-				"Swapped handler did not receive disconnect callback");
-			Require(state.InitialDisconnectedCount == 0,
-				"Replaced initial handler must not receive disconnect callback");
-		}
-	}
-	catch (...) {
-		shutdownAll();
-		throw;
-	}
-	shutdownAll();
-	std::cout << "PASS Group 2: USession ISessionHandler atomic SetHandler swap & disconnect contracts\n";
+	actorA.reset();
+	Require(!comp1->HasOwner(), "Owner WKPTR must expire when actorA dies");
+	Require(actorB->AddComponent(comp1) && actorB->GetComponent<UTestCustomComponent>() == comp1,
+		"Re-attach after owner expiry failed");
+	std::cout << "PASS Group 2: UComponent/UActor static contracts\n";
 }
 
 // Group 3: URoomManager TypeID static_pointer_cast 조회 + SnapshotRooms 정렬 + 크로스-스트랜드 방 이동 계약
@@ -391,7 +319,7 @@ void TestRoomManagerAndTransferContracts()
 	std::cout << "PASS Group 3: URoomManager static TypeID & cross-strand transfer contracts\n";
 }
 
-// Group 4: USession TCP 분할/병합, 예외 격리, 1,020B 초과 차단, 유휴 타임아웃 계약
+// Group 4: USession(UComponent) -> UActor SafeGuard 전달, 1B 분할/2패킷 병합, 예외 격리, 1,020B 초과 차단, 유휴 타임아웃 계약
 void TestSessionNetworkAndIdleTimeoutContracts()
 {
 	auto coreInstance = MakeShared<UCoreInstance>();
@@ -412,13 +340,15 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 		networkManager->Shutdown();
 		if (worker.joinable())
 			worker.join();
+		EXCLUSIVE_LOCK_GUARD lk{ state.Lock };
+		state.AcceptedActors.clear();
 	};
 
 	try {
 		IOCONTEXT clientIo;
 		const TCP_ENDPOINT ep{ ASIO::ip::address_v4::loopback(), port };
 
-		// 4-1. 1B 분할 전송 + 2패킷 병합 전송
+		// 4-1. 1B 분할 전송 + 2패킷 병합 전송 -> 소유자 UActor::OnReceivePacket SafeGuard 전달 검증
 		{
 			TCPSOCKET sock{ clientIo };
 			sock.connect(ep);
@@ -438,6 +368,8 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 				"Fragmented/coalesced packets not received");
 			Require(state.ReceivedPackets[0].GetType() == 11 && state.ReceivedPackets[2].GetType() == 12,
 				"Packet types mismatch");
+			Require(!state.AcceptedActors.empty() && state.AcceptedActors.back()->GetSession() != nullptr,
+				"Actor::GetSession must return mounted USession component");
 			sock.close();
 		}
 
@@ -446,7 +378,7 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 			uint64 prevDisc{ 0 };
 			{
 				SHARED_LOCK_GUARD lk{ state.Lock };
-				prevDisc = state.InitialDisconnectedCount;
+				prevDisc = state.DisconnectedCount;
 			}
 			TCPSOCKET idleSock{ clientIo };
 			idleSock.connect(ep);
@@ -456,8 +388,8 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 			Require(n == 0 && static_cast<bool>(readEc), "Idle client was not disconnected by idle timeout");
 
 			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
-			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.InitialDisconnectedCount > prevDisc; }),
-				"Handler OnSessionDisconnected not fired on idle timeout");
+			Require(state.Changed.wait_for(lk, 2s, [&]() { return state.DisconnectedCount > prevDisc; }),
+				"Actor OnSessionDisconnected not fired on idle timeout");
 		}
 
 		// 4-3. 1,020B 초과 헤더 즉시 차단 검증
@@ -514,7 +446,7 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 		throw;
 	}
 	shutdownAll();
-	std::cout << "PASS Group 4: USession framing, idle timeout, oversize reject, exception isolation\n";
+	std::cout << "PASS Group 4: USession(UComponent) -> UActor framing, idle timeout, oversize reject, exception isolation\n";
 }
 }
 
@@ -523,7 +455,7 @@ int main()
 	try {
 		UCoreGlobal::GetInstance();
 		TestSafeGuardContracts();
-		TestSessionHandlerSwapContracts();
+		TestComponentStaticContracts();
 		TestRoomManagerAndTransferContracts();
 		TestSessionNetworkAndIdleTimeoutContracts();
 		std::cout << "RESULT 4/4 SessionContracts groups passed\n";

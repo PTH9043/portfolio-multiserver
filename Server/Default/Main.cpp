@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 
 	// protobuf 내부(absl)는 잘못된 패킷 해석 같은 경고를 Logger를 거치지 않고 stderr에 직접 쓴다.
-	// 해석 실패는 UPacketHandlerBase가 Logger에 Warning으로 남기므로 중복인 absl 출력은 끄고 FATAL만 남긴다.
+	// 해석 실패는 Server::UPawn이 Logger에 Warning으로 남기므로 중복인 absl 출력은 끄고 FATAL만 남긴다.
 	// 초기화 전에는 기준과 관계없이 모두 stderr로 나가므로 InitializeLog를 먼저 부른다. (2026-11-20 사용자 선택)
 	absl::InitializeLog();
 	absl::SetStderrThreshold(absl::LogSeverityAtLeast::kFatal);

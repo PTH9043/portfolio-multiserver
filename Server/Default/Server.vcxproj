@@ -26,10 +26,8 @@
     <ClInclude Include="..\Public\UDatabaseManager.h" />
     <ClInclude Include="..\Public\UServerInput.h" />
     <ClInclude Include="..\Public\UServerListener.h" />
-    <ClInclude Include="..\Public\UComponent.h" />
+    <ClInclude Include="..\Public\UServerSession.h" />
     <ClInclude Include="..\Public\UPawn.h" />
-    <ClInclude Include="..\Public\UPacketHandlerBase.h" />
-    <ClInclude Include="..\Public\UAuthHandler.h" />
     <ClInclude Include="..\Public\UGameRoom.h" />
     <ClInclude Include="..\Public\UPlayer.h" />
   </ItemGroup>
@@ -40,10 +38,8 @@
     <ClCompile Include="..\Private\UDatabaseManager.cpp" />
     <ClCompile Include="..\Private\UServerInput.cpp" />
     <ClCompile Include="..\Private\UServerListener.cpp" />
-    <ClCompile Include="..\Private\UComponent.cpp" />
+    <ClCompile Include="..\Private\UServerSession.cpp" />
     <ClCompile Include="..\Private\UPawn.cpp" />
-    <ClCompile Include="..\Private\UPacketHandlerBase.cpp" />
-    <ClCompile Include="..\Private\UAuthHandler.cpp" />
     <ClCompile Include="..\Private\UGameRoom.cpp" />
     <ClCompile Include="..\Private\UPlayer.cpp" />
     <ClCompile Include="Main.cpp" />
