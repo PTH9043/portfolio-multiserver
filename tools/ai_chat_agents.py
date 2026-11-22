@@ -48,7 +48,7 @@ PACKET_HEADER_SIZE = 4
 PACKET_MAX_BODY_SIZE = 1020
 CHAT_MAX_CHARS = 185
 
-DEFAULT_TRACE_DIR = Path(r"D:\__job\Project\AI_Portfolio\MultiServer\Server\Bin\ChangeViewerTrace")
+DEFAULT_TRACE_DIR = Path(__file__).resolve().parent.parent / "Server" / "Bin" / "ChangeViewerTrace"
 
 
 # ---- 최소 Protobuf 와이어 코덱 (외부 의존성 없음) ----

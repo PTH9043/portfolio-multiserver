@@ -48,7 +48,7 @@
    - `USession`은 대기 큐에서 최대 **64프레임**을 Scatter-Gather 배치 `async_write`로 묶어 시스템 콜 횟수를 줄이고, 느린 클라이언트의 송신 큐가 **1 MiB(1,048,576 B)**를 초과하면 Warning 로그를 남기고 즉시 연결을 차단합니다(백프레셔 보호).
    - 1,000명 동시 입장/퇴장 폭주 시 `SC_ROOM_USER_COUNT`를 **25 ms Coalescing**으로 병합해 불필요한 폭주 패킷의 **98.54%**를 제거했습니다.
 3. **공용 `HandlePacket<TPacket>` & 명확한 오류/경고 정책**
-   - 패킷마다 중복 핸들러를 늘리지 않고 `UServerSession::HandlePacket<TPacket>`으로 역직렬화 경로를 단일화했습니다.
+   - 패킷마다 중복 핸들러를 늘리지 않고 `Server::UPawn::HandlePacket<TPacket>`으로 역직렬화 경로를 단일화했습니다.
    - 규칙 위반 채팅(빈 문자열·200자 초과·비정상 UTF-8)은 사유와 바이트 수를 Warning으로 기록하고 연결을 유지하며, 미정의 패킷 번호·Protobuf 파싱 실패·헤더 1,020 B 초과는 Warning 후 해당 연결만 즉시 닫습니다.
 4. **이중 관측 파이프라인 (`CVTRACE1` 이진 `.cvtrace` + JSONL `.cvlog`)**
    - 네트워크 핫패스에는 256 B 고정 이진 슬롯(`Off` / `FlightRecorder` 16,384슬롯 / `AsyncStream` 4,096슬롯)만 기록하고, 운영 로그(`ULogger`)는 전용 워커 스레드 배치 콜백에서 동반 `.cvlog`를 기록해 `traceSeq`로 1:1 연결합니다.
