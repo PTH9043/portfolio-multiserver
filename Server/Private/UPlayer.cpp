@@ -6,7 +6,6 @@
 #include "UCoreInstance.h"
 #include "URoomManager.h"
 #include "ULogger.h"
-#include "Packet.h"
 
 #include "packet_type.pb.h"
 #include "login.pb.h"
@@ -23,9 +22,10 @@ namespace Protocol = multiplayer::protocol;
 
 SPACE_H(Server)
 
-UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, FPlayerInfo info,
-	Core::SHPTR<UNicknameRegistry> nicknameRegistry, Core::SHPTR<UDatabaseManager> databaseManager)
-	: UCharacter{ std::move(coreInstance) },
+UPlayer::UPlayer(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::SHPTR<Core::USession> session,
+	FPlayerInfo info, Core::SHPTR<UNicknameRegistry> nicknameRegistry, Core::SHPTR<UDatabaseManager> databaseManager)
+	: UPawn{ coreInstance },
+	  UPacketHandlerBase{ std::move(coreInstance), std::move(session), "UPlayer" },
 	  _Info{ std::move(info) },
 	  _NicknameRegistry{ std::move(nicknameRegistry) },
 	  _DatabaseManager{ std::move(databaseManager) }
@@ -51,35 +51,6 @@ void UPlayer::SetGameRoom(const Core::SHPTR<UGameRoom>& gameRoom) noexcept
 		_LastRoomID = static_cast<Core::uint32>(gameRoom->GetRoomID());
 }
 
-// 로그인 이후 세션에서 올라온 패킷을 타입별로 분기 처리한다.
-void UPlayer::OnReceivePacket(const Core::FPacketView& packet)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, OnReceivePacket, GetRuntimeTraceID());
-	switch (packet.GetType()) {
-	case Protocol::CS_LOGIN:
-		HandlePacket<Protocol::CSLogin>(packet);
-		break;
-	case Protocol::CS_CHAT:
-		HandlePacket<Protocol::CSChat>(packet);
-		break;
-	case Protocol::CS_ROOM_USERS:
-		HandlePacket<Protocol::CSRoomUsers>(packet);
-		break;
-	case Protocol::CS_ROOM_LIST:
-		HandlePacket<Protocol::CSRoomList>(packet);
-		break;
-	case Protocol::CS_JOIN_ROOM:
-		HandlePacket<Protocol::CSJoinRoom>(packet);
-		break;
-	case Protocol::CS_PING:
-		HandlePacket<Protocol::CSPing>(packet);
-		break;
-	default:
-		RejectPacket(packet.GetType(), "undefined packet type");
-		break;
-	}
-}
-
 // 세션 종료 시 전역 닉네임을 즉시 해제하고 소속 방 퇴장 및 비동기 DB 로그아웃 이력을 요청한다.
 void UPlayer::OnSessionDisconnected()
 {
@@ -99,54 +70,35 @@ void UPlayer::OnSessionDisconnected()
 	}
 }
 
-// 패킷 뷰를 Protobuf 메시지로 역직렬화하고 실패 시 연결을 닫는다.
-template<class TPacket>
-void UPlayer::HandlePacket(const Core::FPacketView& packetView)
+// 로그인 이후 세션에서 올라온 도메인 패킷을 타입별로 분기 처리한다(CS_PING은 UPacketHandlerBase 선처리).
+void UPlayer::OnDomainPacket(const Core::FPacketView& packet)
 {
-	RUNTIME_TRACE_SCOPE(UPlayer, HandlePacket, GetRuntimeTraceID());
-	TPacket packet;
-	if (!packet.ParseFromArray(packetView.GetData(), static_cast<int>(packetView.GetSize()))) {
-		RejectPacket(packetView.GetType(), "parse failed");
-		return;
+	RUNTIME_TRACE_SCOPE(UPlayer, OnDomainPacket, GetRuntimeTraceID());
+	switch (packet.GetType()) {
+	case Protocol::CS_LOGIN:
+		HandlePacket<Protocol::CSLogin>(packet, [this](const Protocol::CSLogin& parsed) { OnPacket(parsed); });
+		break;
+	case Protocol::CS_CHAT:
+		HandlePacket<Protocol::CSChat>(packet, [this](const Protocol::CSChat& parsed) { OnPacket(parsed); });
+		break;
+	case Protocol::CS_ROOM_USERS:
+		HandlePacket<Protocol::CSRoomUsers>(packet, [this](const Protocol::CSRoomUsers& parsed) { OnPacket(parsed); });
+		break;
+	case Protocol::CS_ROOM_LIST:
+		HandlePacket<Protocol::CSRoomList>(packet, [this](const Protocol::CSRoomList& parsed) { OnPacket(parsed); });
+		break;
+	case Protocol::CS_JOIN_ROOM:
+		HandlePacket<Protocol::CSJoinRoom>(packet, [this](const Protocol::CSJoinRoom& parsed) { OnPacket(parsed); });
+		break;
+	default:
+		RejectPacket(packet.GetType(), "undefined packet type");
+		break;
 	}
-
-	OnPacket(packet);
 }
 
-// 응답 패킷을 직렬화해 부착된 세션으로 송신한다.
-template<class TPacket>
-void UPlayer::SendPacket(const Core::uint16 packetType, const TPacket& packet)
+void UPlayer::OnPacketRejected() noexcept
 {
-	RUNTIME_TRACE_SCOPE(UPlayer, SendPacket, GetRuntimeTraceID());
-	const auto session = GetSession();
-	if (!session)
-		return;
-
-	const Core::uint64 bodySize{ static_cast<Core::uint64>(packet.ByteSizeLong()) };
-	if (bodySize > Core::PACKET_MAX_BODY_SIZE) {
-		const auto coreInstance = GetCoreInstance();
-		const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
-		if (logger) {
-			Core::FString message{ "UPlayer skipped oversized packet type " };
-			message << std::to_string(packetType) << " (" << std::to_string(bodySize) << " bytes)";
-			logger->TryLog(Core::ELogLevel::Warning, message.View());
-		}
-		return;
-	}
-
-	Core::ARRAY<Core::uint8, Core::PACKET_MAX_BODY_SIZE> buffer{};
-	if (bodySize != 0 && !packet.SerializeToArray(buffer.data(), static_cast<int>(bodySize))) {
-		const auto coreInstance = GetCoreInstance();
-		const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
-		if (logger) {
-			Core::FString message{ "UPlayer failed to serialize packet type " };
-			message << std::to_string(packetType);
-			logger->TryLog(Core::ELogLevel::Warning, message.View());
-		}
-		return;
-	}
-
-	session->Send(bodySize == 0 ? nullptr : buffer.data(), bodySize, packetType);
+	_DisconnectReason = Core::FString{ "PROTOCOL_ERROR" };
 }
 
 // 이미 로그인된 플레이어의 중복 로그인 요청을 거절한다.
@@ -281,15 +233,6 @@ void UPlayer::OnPacket(const Protocol::CSJoinRoom& packet)
 	}
 }
 
-// 클라이언트 하트비트 Ping에 타임스탬프를 그대로 돌려보낸다.
-void UPlayer::OnPacket(const Protocol::CSPing& packet)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, OnPacket, GetRuntimeTraceID());
-	Protocol::SCPong response;
-	response.set_client_time_ms(packet.client_time_ms());
-	SendPacket(Protocol::SC_PONG, response);
-}
-
 // 이전 방 퇴장 완료 후 대상 방 입장을 요청한다(중도 이탈 시 즉시 중단).
 void UPlayer::OnLeaveRoomForTransferCompleted(const Core::SHPTR<UGameRoom>& previousRoom, const Core::SHPTR<UGameRoom>& targetRoom)
 {
@@ -398,22 +341,6 @@ void UPlayer::ReleaseNicknameOnce() noexcept
 {
 	if (_NicknameRegistry && !_NicknameReleased.exchange(true, std::memory_order_acq_rel))
 		_NicknameRegistry->Release(_Info.Nickname.View());
-}
-
-// 프로토콜 위반 패킷을 경고 기록하고 세션을 닫는다.
-void UPlayer::RejectPacket(const Core::uint16 packetType, const Core::STRINGVIEW reason)
-{
-	RUNTIME_TRACE_SCOPE(UPlayer, RejectPacket, GetRuntimeTraceID());
-	_DisconnectReason = Core::FString{ "PROTOCOL_ERROR" };
-	const auto coreInstance = GetCoreInstance();
-	const auto logger = coreInstance ? coreInstance->GetLogger() : nullptr;
-	if (logger) {
-		Core::FString message{ "UPlayer rejected packet type " };
-		message << std::to_string(packetType) << " (" << reason << "); closing the connection";
-		logger->TryLog(Core::ELogLevel::Warning, message.View());
-	}
-	if (const auto session = GetSession())
-		session->Close();
 }
 
 SPACE_T

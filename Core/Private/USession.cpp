@@ -1,6 +1,6 @@
 #include "CoreDefine.h"
 #include "USession.h"
-#include "UPawn.h"
+#include "ISessionHandler.h"
 #include "UCoreInstance.h"
 #include "ULogger.h"
 #include <boost/asio/bind_executor.hpp>
@@ -18,7 +18,7 @@
 SPACE_H(Core)
 
 USession::USession(SHPTR<UCoreInstance> coreInstance, TCPSOCKET socket)
-    : UComponent{ std::move(coreInstance) },
+    : UObject{ std::move(coreInstance) },
       _Socket{ std::move(socket) },
       _Strand{ ASIO::make_strand(_Socket.get_executor()) },
       _IdleTimer{ _Socket.get_executor() }
@@ -51,6 +51,14 @@ uint64 USession::GetHash() const noexcept
 bool USession::IsEqual(const USession& other) const noexcept
 {
     return this == &other;
+}
+
+// 초기 바인딩 또는 이 Session의 strand 안에서 현재 활성 핸들러를 교체한다.
+void USession::SetHandler(SHPTR<ISessionHandler> handler) noexcept
+{
+    if (_Closed.load(std::memory_order_acquire))
+        return;
+    _Handler = std::move(handler);
 }
 
 // 유휴 수신 타임아웃(ms)을 설정한다(0 이하이면 비활성화).
@@ -161,16 +169,14 @@ bool USession::PostToSession(FUNC<void()> task)
 void USession::ProcessingData(const FPacketView& packet)
 {
     RUNTIME_TRACE_SCOPE(USession, ProcessingData, GetRuntimeTraceID());
-    if (const auto owner = GetOwner()) {
-        owner->OnReceivePacket(packet);
+    // 핸들러 내부에서 SetHandler로 교체하더라도 현재 실행 중인 핸들러의 수명을 스택에서 보장한다.
+    const SHPTR<ISessionHandler> handler = _Handler;
+    if (!handler) {
+        CloseConnection();
         return;
     }
 
-    OnUnboundPacket(packet);
-}
-
-void USession::OnDisconnected()
-{
+    handler->OnReceivePacket(packet);
 }
 
 void USession::StartSend()
@@ -252,9 +258,9 @@ void USession::CloseConnection()
 
     if (!_DisconnectedNotified) {
         _DisconnectedNotified = true;
-        OnDisconnected();
-        if (const auto owner = GetOwner())
-            owner->OnSessionDisconnected();
+        SHPTR<ISessionHandler> handler = std::move(_Handler);
+        if (handler)
+            handler->OnSessionDisconnected();
     }
 }
 

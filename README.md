@@ -16,23 +16,25 @@
                                     │ TCP (127.0.0.1:<port>)
 ┌───────────────────────────────────▼────────────────────────────────────────┐
 │  Server (ServerApp.exe)                                                    │
-│  UServerApp ─ UServerListener ─ UServerSession (회원가입/로그인 핸드셰이크)│
+│  UServerApp ─ UServerListener ─ Core::USession (ISessionHandler 위임)      │
+│  UPacketHandlerBase (공용 HandlePacket·SendPacket·RejectPacket·CS_PING)    │
+│    ├─ UAuthHandler (미인증 경량: CS_REGISTER·CS_LOGIN → SetHandler 핸드오프)│
+│    └─ Server::UPawn(UComponent) → UPlayer (채팅·방 이동·퇴장·DB 로그아웃)  │
 │  UDatabaseManager (DB 전용 워커 4스레드 · 스레드당 전용 MYSQL* · 3단 배수) │
 │  FMySqlConnection (RAII + Prepared Statement) · PasswordHasher (CNG PBKDF2)│
-│  UPlayer (UPawn 컴포넌트 소유, 도메인 패킷·방 이동·전역 닉네임 RAII 관리)  │
 │  UGameRoom × 4 (로비/자유/전략/거래, 독립 Strand · 내부 mutex 0 · 25ms 병합)│
 ├────────────────────────────────────────────────────────────────────────────┤
-│  Core (Core.dll — Protobuf · DB 비의존 · dynamic_cast 0건)                 │
+│  Core (Core.dll — Protobuf · DB · 게임 엔티티 비의존 · dynamic_cast 0건)   │
 │  UCoreInstance ─ UThreadManager / UNetworkManager / ULogger / URoomManager │
-│  UComponent · UPawn(CONUNORMAP) · USession(Shared Frame·1MiB Cap·유휴타이머)│
+│  UObject → UActor(최소 방 개체) · USession(final, ISessionHandler 위임)    │
 │  FPacketView(NO_COPY) + FPacketPayload(Detach 불변) · CustomMemory TLS 풀  │
 │  RuntimeTrace (Off / FlightRecorder / AsyncStream → .cvtrace + .cvlog)     │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 계층 경계 및 책임 분리
-- **Core (`Core/Public`, `Core/Private`)**: 소켓 생명주기(`UListener`, `USession`), 스레드/네트워크/로그/방 매니저(`UCoreInstance` 소유), 게임 사물 기반 계층(`UObject → UActor → UPawn → UCharacter`), 크기별 메모리 풀(`CustomMemory`), 런타임 계측(`RuntimeTrace`). **Protobuf에 일절 의존하지 않습니다.**
-- **Server (`Server/Public`, `Server/Private`)**: 패킷 역직렬화·검증(`UServerSession::HandlePacket<TPacket>`), 채팅 도메인 규칙(`UGameRoom`, `UPlayer`, `ChatProtocolLimits.h`), 실행 진입점(`ServerApp`, `Main.cpp`). 소켓 API를 직접 호출하지 않습니다.
+- **Core (`Core/Public`, `Core/Private`)**: 순수 TCP 소켓 생명주기(`UListener`, `USession`, `ISessionHandler`), 스레드/네트워크/로그/방 매니저(`UCoreInstance` 소유), 최소 방 개체(`UObject → UActor`), 크기별 메모리 풀(`CustomMemory`), 런타임 계측(`RuntimeTrace`). **Protobuf · DB · 게임 엔티티(`UPawn`/`UComponent`)에 일절 의존하지 않습니다.**
+- **Server (`Server/Public`, `Server/Private`)**: 공용 패킷 인프라(`UPacketHandlerBase`), 미인증 경량 인증 핸들러(`UAuthHandler`), 게임 엔티티 계층(`UComponent`, `UPawn`, `UPlayer`), DB 전용 스레드 풀(`UDatabaseManager`, `FMySqlConnection`, `PasswordHasher`), 채팅 도메인(`UGameRoom`, `ChatProtocolLimits.h`), 실행 진입점(`ServerApp`, `Main.cpp`). 소켓 API를 직접 호출하지 않습니다.
 - **Protocol (`Protocol/Schema`)**: 방향별 패킷 번호(`packet_type.proto`)와 도메인별 메시지(`login.proto`, `chat.proto`, `room.proto`) 단일 출처. `Build_Protocol.bat`으로 C++(`GameProtocol.lib`)과 C# 코드를 동시 생성하고 SHA-256 동기화를 검사합니다.
 
 ---
@@ -152,8 +154,8 @@ Tests\.build\ListenerContracts\Debug\bin\ListenerContracts.exe
 
 ## 6. 프로젝트 폴더 구조
 
-- `Core/` — 공통 네트워크·메모리 풀·비동기 로거·액터/방 기반·런타임 트레이스 DLL (Protobuf · DB 비의존)
-- `Server/` — 채팅 서버 애플리케이션(`ServerApp`, `UServerListener`, `UServerSession`, `UDatabaseManager`, `FMySqlConnection`, `PasswordHasher`, `UGameRoom`, `UPlayer`)
+- `Core/` — 순수 네트워크·메모리 풀·비동기 로거·최소 방 개체(`UActor`)·`ISessionHandler`·런타임 트레이스 DLL (Protobuf · DB · 게임 엔티티 비의존)
+- `Server/` — 채팅 서버 애플리케이션(`ServerApp`, `UServerListener`, `UPacketHandlerBase`, `UAuthHandler`, `UComponent`, `UPawn`, `UPlayer`, `UDatabaseManager`, `FMySqlConnection`, `PasswordHasher`, `UGameRoom`)
 - `db/` — Docker MySQL 8.4 구성(`docker-compose.yml`) 및 스키마(`schema.sql`: `accounts`, `connection_logs`)
 - `Protocol/` — `.proto` 스키마, `Build_Protocol.bat` 생성 파이프라인, `ServerProtocol.props`(`/external:W0`)
 - `Tests/` — Core 계약 회귀 시험 4종(`MemoryContracts`, `LoggerContracts`, `ListenerContracts`, `SessionContracts`)

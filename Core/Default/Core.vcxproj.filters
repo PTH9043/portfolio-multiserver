@@ -22,6 +22,9 @@
     <ClInclude Include="..\Public\IHashable.h">
       <Filter>95.Interface</Filter>
     </ClInclude>
+    <ClInclude Include="..\Public\ISessionHandler.h">
+      <Filter>95.Interface</Filter>
+    </ClInclude>
     <ClInclude Include="..\Public\UCoreGlobal.h">
       <Filter>00.Global</Filter>
     </ClInclude>
@@ -81,15 +84,6 @@
     </ClInclude>
     <ClInclude Include="..\Public\UActor.h">
       <Filter>03.GameObj\Actor</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\UPawn.h">
-      <Filter>03.GameObj\Actor\Pawn</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\UCharacter.h">
-      <Filter>03.GameObj\Actor\Pawn\Character</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\UComponent.h">
-      <Filter>04.Comp</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -247,15 +241,6 @@
     </ClCompile>
     <ClCompile Include="..\Private\UActor.cpp">
       <Filter>03.GameObj\Actor</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\UPawn.cpp">
-      <Filter>03.GameObj\Actor\Pawn</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\UCharacter.cpp">
-      <Filter>03.GameObj\Actor\Pawn\Character</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\UComponent.cpp">
-      <Filter>04.Comp</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
