@@ -60,7 +60,7 @@
 - 함수 이름은 결과의 보장 수준을 드러낸다. `Request…`는 요청만 하고 결과를 보장하지 않는 함수에 쓴다. 부르면 반드시 그 결과에 이르는 함수(예: 실패해도 강제로 끝내는 네트워크 종료 `UNetworkManager::Shutdown`)에는 `Request`를 붙이지 않는다. (2026-11-16 사용자 지시: "RequestStop은 요청한다잖아 부르면 꺼지면 강제로 꺼진다고 해야지")
 - CPP에서 클래스 멤버 함수를 정의할 때 헤더에 선언된 순서를 따른다. (2026-11-12)
 - 일반 `std::mutex` 사용을 금지한다. 동기화에는 프로젝트의 `SHARED_MUTEX`를 사용한다. 공유 상태를 읽기만 하고 동시 읽기가 안전한 구간은 `SHARED_LOCK_GUARD`를 사용하고, 상태 변경과 배타 처리가 필요한 구간은 `EXCLUSIVE_LOCK_GUARD`로 보호한다. (2026-11-11 원문: "읽기만 되는거면 READLOCK만 걸어 그냥 쌩 MUTEX는 전면 금지야")
-- Core 객체와 매니저는 `UCoreBase` 계열을 상속하고, 매니저(`UThreadManager`, `UNetworkManager`, `ULogger`)는 `UCoreInstance`가 소유하며 매니저 기능은 `UCoreInstance`를 거쳐 사용하는 방향을 따른다(예: `RegisterWorkerThread`). 사용자는 2026-11-14에 `UNonCopyableObject`·`UCopyableObject` 중간 계층을 제거했다. 현재 `UThreadManager`·`UNetworkManager`·`ULogger`·`UListener`·`USession`은 `UObject`를 직접 상속하고, `UCoreInstance`와 `UJobQueue`는 `UCoreBase`를 직접 상속한다. `UObject`는 생성 시 받은 `UCoreInstance`를 `WKPTR`로 보관한다. `UObject` 자체에는 `NO_COPY`가 없으며, 복사·이동 가능 여부는 각 파생 클래스의 선언과 멤버를 확인한다.
+- Core 객체와 매니저는 `UCoreBase` 계열을 상속하고, 매니저(`UThreadManager`, `UNetworkManager`, `ULogger`, `URoomManager`)는 `UCoreInstance`가 소유하며 매니저 기능은 `UCoreInstance`를 거쳐 사용하는 방향을 따른다(예: `RegisterWorkerThread`). 사용자는 2026-11-14에 `UNonCopyableObject`·`UCopyableObject` 중간 계층을 제거했다. 현재 `UThreadManager`·`UNetworkManager`·`ULogger`·`URoomManager`·`UListener`·`URoom`·`UComponent`·`UActor`는 `UObject`를 직접 상속하고, `USession`은 `UComponent`를 상속하며, `UCoreInstance`는 `UCoreBase`를 직접 상속한다. `UObject`는 생성 시 받은 `UCoreInstance`를 `WKPTR`로 보관한다. `UObject` 자체에는 `NO_COPY`가 없으며, 복사·이동 가능 여부는 각 파생 클래스의 선언과 멤버를 확인한다.
   - 현재 이 방향과 다른 부분: `ServerApp`은 일부 매니저를 `Get…Manager()`로 받아 직접 호출한다. `FWorkerLogChannel`은 `MakeShared`로 만들지만 `UCoreBase`를 상속하지 않는다. 이런 부분을 바꿀지는 사용자가 정한다.
 
 ### 1-2. 사용자의 지적에서 정리한 기준
@@ -90,11 +90,11 @@
 ### 프로젝트와 파일
 
 - 솔루션 `MultiplayerGame.sln`에는 `Core`(DLL)와 `ServerApp`(EXE)만 있다. `Tests/*.vcxproj`는 솔루션에 포함되지 않은 별도 시험 프로젝트이며, Core의 CPP를 `CORE_EXPORTS`로 직접 컴파일한다.
-- 헤더는 `Public/`, 구현은 `Private/`, 프로젝트 파일과 진입점은 `Default/`에 둔다. `U`로 시작하는 클래스 파일은 클래스 이름과 같다(`UListener.h`, `UListener.cpp`). 그 밖의 파일은 기능 이름을 쓴다(`CustomMemory.h`, `Packet.h`, `ServerApp.h`, `IDGenerator.h`).
+- 헤더는 `Public/`, 구현은 `Private/`, 프로젝트 파일과 진입점은 `Default/`에 둔다. `U`로 시작하는 클래스 파일은 클래스 이름과 같다(`UListener.h`, `UListener.cpp`). 그 밖의 파일은 기능 이름을 쓴다(`CustomMemory.h`, `Packet.h`, `ServerApp.h`).
 - Core·Server는 `stdcpplatest`와 `/utf-8`로 빌드한다. `Tests`의 프로젝트는 `stdcpp20`으로 Core 소스를 컴파일하므로, Core에 C++20보다 새로운 기능을 쓰면 계약 시험 빌드가 깨질 수 있다.
 - 소스는 BOM 없는 UTF-8이며, 주석은 한국어로 쓴다.
 - 헤더는 `#pragma once`로 시작한다. 다른 Core 클래스는 가능하면 전방 선언하고, 구현 파일에서 include한다.
-- Core의 CPP는 대부분 `#include "CoreDefine.h"`를 첫 줄에 두고, 그다음 자기 헤더와 필요한 Core 헤더, 마지막으로 외부·표준 헤더를 둔다(예외: `UJobQueue.cpp`). 표준·Boost.Asio 공통 헤더는 이미 `CoreTypes.h`, `CoreStlTypes.h`가 포함하므로 중복 추가 전에 확인한다.
+- Core의 CPP는 `#include "CoreDefine.h"`를 첫 줄에 두고, 그다음 자기 헤더와 필요한 Core 헤더, 마지막으로 외부·표준 헤더를 둔다. 표준·Boost.Asio 공통 헤더는 이미 `CoreTypes.h`, `CoreStlTypes.h`가 포함하므로 중복 추가 전에 확인한다.
 - Server에 공개하는 Core 클래스에는 `CORE_DLL`을 붙인다. 메모리 풀(`UMemoryPool`, `UMemoryAdiminstor` 등)과 계측 내부 클래스에는 붙어 있지 않다.
 
 ### 네임스페이스
@@ -126,7 +126,7 @@
   - 이름: `_bRunning`, `_idIssuance`, `_allocSize`, `FPacketHeader`의 `type`·`size`, `UThreadManager`의 `Work`·`Data`·`CurrentThreadID`·`Thread`, `UNetworkManager::RunWorker(void* Data)`, 메모리 풀 코드의 `pMemoryPool`·`mHeader`·`eMemoryPoolMetricIndex`.
   - 접두사: 이름은 `F`이지만 class인 `FWorkerLogChannel`, `U`가 없는 클래스 템플릿 `CustomString`, 배열 색인을 위해 `enum class`가 아닌 `EMemoryPoolMetricIndex`, 기반 타입이 없는 `EStopState`·`EResult`.
   - 별칭: 클래스 안의 `F` 접두사 별칭 `FOnFailure`·`FNotify`, 문자열 타입 `FString`·`FWString`.
-  - 형태: `final`이 아닌 `UIDGenerator`·`UAllocator`, `explicit`이 아닌 `UObject` 생성자, `ATOMIC_BOOL` 대신 `ATOMIC<bool>`을 쓴 `ServerApp.h`.
+  - 형태: `final`이 아닌 `UAllocator`, `explicit`이 아닌 `UObject` 생성자, `ATOMIC_BOOL` 대신 `ATOMIC<bool>`을 쓴 `ServerApp.h`.
 
 ### 타입과 메모리
 
@@ -162,7 +162,7 @@
 ### 서식
 
 - 함수 정의의 여는 중괄호는 다음 줄에 둔다. 클래스 선언과 제어문의 중괄호 위치는 해당 파일의 기존 형식을 따른다.
-- 들여쓰기는 파일마다 탭 또는 공백 4칸이다. `UListener`, `USession`, `ULogger.cpp`, `FWorkerLogChannel`, `UCoreInstance`, `UJobQueue.h`, `Tests`는 공백 4칸이고, 나머지 대부분은 탭이다. `CoreMacro.h`는 둘이 섞여 있다.
+- 들여쓰기는 파일마다 탭 또는 공백 4칸이다. `UListener`, `USession`, `ULogger.cpp`, `FWorkerLogChannel`, `UCoreInstance`, `Tests`는 공백 4칸이고, 나머지 대부분은 탭이다. `CoreMacro.h`는 둘이 섞여 있다.
 - 줄바꿈도 파일마다 LF 또는 CRLF 한 가지를 쓴다. 2026-11-13 기준 Core·Server 46개 파일 중 LF 25개, CRLF 21개이며, 한 파일 안에서 섞인 경우는 없다. 헤더와 CPP의 형식이 다를 수도 있다(`UThreadManager.h`는 CRLF, `.cpp`는 LF).
 - 수정할 때는 파일의 기존 들여쓰기와 줄바꿈을 유지하고, 파일 전체를 다시 정렬하지 않는다. 새 파일은 짝이 되는 파일이나 같은 폴더의 파일 형식을 따른다.
 - 한 헤더에 여러 클래스나 묶음이 있으면 `/*`, `----`, 이름, `----`, `*/` 형태의 구분 주석 블록으로 나눈다(`CustomMemory.h`, `CoreStlTypes.h`).
@@ -195,7 +195,7 @@ Claude·Codex 등 AI가 이 솔루션에서 코드를 다룰 때 지킨다.
 ### 검증
 
 - 빌드와 시험은 `%TEMP%` 아래 분리 복사본에서 VS MSBuild로 x64 Debug·Release를 실행한다. Boost 경로는 `-p:BoostIncludeDir=<저장소>\ThirdParty\boost_1_92_0`으로 넘긴다. 실제 `Server/Bin`은 덮어쓰지 않는다.
-- 변경 범위에 해당하는 계약 시험 `MemoryContracts`, `LoggerContracts`, `ListenerContracts`, `SessionContracts`(세션·컴포넌트·SafeGuard·다중 방 계약 포함) 4종을 다시 실행한다. 시험 프로젝트가 경로 옵션을 받지 않으면 복사본에서만 보정한다. `MemoryWalkthrough`, `ThreadSchedulerTests`는 없는 파일(`ACoreBase.cpp`, `GlobalFunc.cpp`, `UJobScheduler.cpp`)을 참조하는 오래된 프로젝트라 회귀 시험으로 쓰지 않는다.
+- 변경 범위에 해당하는 계약 시험 `MemoryContracts`, `LoggerContracts`, `ListenerContracts`, `SessionContracts`(세션·컴포넌트·SafeGuard·다중 방 계약 포함) 4종을 다시 실행한다. 시험 프로젝트가 경로 옵션을 받지 않으면 복사본에서만 보정한다.
 - 빌드 성공을 동시성 정확성이나 성능 증명으로 보고하지 않는다. 처리량·대기 시간을 측정하지 않았으면 "최적화됐다", "잠금이 적다"고 말하지 않는다.
 - 작업이 끝나면 이번 작업에서 만든 복사본과 임시 시험 파일, 이번 빌드가 만든 `%TEMP%\_CL_*`만 지운다. 다른 빌드의 임시 파일은 건드리지 않는다.
 

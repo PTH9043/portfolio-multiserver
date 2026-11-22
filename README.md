@@ -147,7 +147,7 @@ Tests\.build\LoggerContracts\Debug\bin\LoggerContracts.exe
 msbuild Tests\ListenerContracts.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64
 Tests\.build\ListenerContracts\Debug\bin\ListenerContracts.exe
 ```
-> **참고 (보존/예약 항목)**: `Tests/` 내 `MemoryContracts` · `LoggerContracts` · `ListenerContracts` · `SessionContracts` 4종이 현재 Core 회귀 시험 대상입니다. `MemoryWalkthrough` · `ThreadSchedulerTests`는 초기 구버전 API를 참조하는 아카이브 프로젝트입니다. `Core/Public/UJobQueue.h`는 추후 게임 루프 확장용으로 보존된 예약 클래스입니다.
+> **참고**: `Tests/` 내 `MemoryContracts` · `LoggerContracts` · `ListenerContracts` · `SessionContracts` 4종이 현재 Core 회귀 시험 전체입니다(미사용 `UJobQueue`·`IDGenerator` 및 구버전 아카이브 시험 프로젝트는 정리 완료).
 
 ---
 

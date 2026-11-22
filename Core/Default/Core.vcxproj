@@ -26,7 +26,6 @@
     <ClInclude Include="..\Public\CoreStlTypes.h" />
     <ClInclude Include="..\Public\IHashable.h" />
     <ClInclude Include="..\Public\CustomAlloc.h" />
-    <ClInclude Include="..\Public\IDGenerator.h" />
     <ClInclude Include="..\Public\CoreTypes.h" />
     <ClInclude Include="..\Public\CustomString.h" />
     <ClInclude Include="..\Public\CustomMemory.h" />
@@ -45,7 +44,6 @@
     <ClInclude Include="..\Public\UListener.h" />
     <ClInclude Include="..\Public\USession.h" />
     <ClInclude Include="..\Public\URoom.h" />
-    <ClInclude Include="..\Public\UJobQueue.h" />
     <ClInclude Include="..\Public\UActor.h" />
   </ItemGroup>
   <ItemGroup>
@@ -53,7 +51,6 @@
     <ClCompile Include="..\Private\RuntimeTrace.cpp" />
     <ClCompile Include="..\Private\CustomAlloc.cpp" />
     <ClCompile Include="..\Private\CustomMemory.cpp" />
-    <ClCompile Include="..\Private\IDGenerator.cpp" />
     <ClCompile Include="..\Private\MPMetrics.cpp" />
     <ClCompile Include="..\Private\Packet.cpp" />
     <ClCompile Include="..\Private\RunTimeMetrics.cpp" />
@@ -69,7 +66,6 @@
     <ClCompile Include="..\Private\UListener.cpp" />
     <ClCompile Include="..\Private\USession.cpp" />
     <ClCompile Include="..\Private\URoom.cpp" />
-    <ClCompile Include="..\Private\UJobQueue.cpp" />
     <ClCompile Include="..\Private\UActor.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

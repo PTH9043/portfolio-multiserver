@@ -40,9 +40,6 @@
     <ClInclude Include="..\Public\Packet.h">
       <Filter>96.Utility\packet</Filter>
     </ClInclude>
-    <ClInclude Include="..\Public\UJobQueue.h">
-      <Filter>96.Utility\Job</Filter>
-    </ClInclude>
     <ClInclude Include="..\Public\ULogger.h">
       <Filter>01.Manager\Logger</Filter>
     </ClInclude>
@@ -51,9 +48,6 @@
     </ClInclude>
     <ClInclude Include="..\Public\UCoreInstance.h">
       <Filter>01.Manager</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Public\IDGenerator.h">
-      <Filter>97.StaticClass\IDGenerator</Filter>
     </ClInclude>
     <ClInclude Include="..\Public\UThreadManager.h">
       <Filter>01.Manager\ThreadManager</Filter>
@@ -96,9 +90,6 @@
     <Filter Include="98.Default">
       <UniqueIdentifier>{2c99df6b-3450-456c-9a1a-02812f20bfcb}</UniqueIdentifier>
     </Filter>
-    <Filter Include="97.StaticClass">
-      <UniqueIdentifier>{4a0210c4-5e1a-40d7-ba10-583155af9a3e}</UniqueIdentifier>
-    </Filter>
     <Filter Include="96.Utility">
       <UniqueIdentifier>{01a7e8ea-cfc3-42e0-9837-13ead835430c}</UniqueIdentifier>
     </Filter>
@@ -114,9 +105,6 @@
     <Filter Include="99.RuntimeMetric\MP">
       <UniqueIdentifier>{f4fc4eac-bd7f-48e5-98d2-5c8cab3619f1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="96.Utility\Job">
-      <UniqueIdentifier>{399e2416-edc3-4001-9cb4-b89629cfa1d5}</UniqueIdentifier>
-    </Filter>
     <Filter Include="96.Utility\String">
       <UniqueIdentifier>{64c36716-6ec8-4f5f-ace5-e3d74679616c}</UniqueIdentifier>
     </Filter>
@@ -125,9 +113,6 @@
     </Filter>
     <Filter Include="01.Manager">
       <UniqueIdentifier>{09f12e07-389f-4248-a06f-c815fa16660f}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="97.StaticClass\IDGenerator">
-      <UniqueIdentifier>{53a276fd-7e80-4e2d-960a-2dce5d895932}</UniqueIdentifier>
     </Filter>
     <Filter Include="01.Manager\ThreadManager">
       <UniqueIdentifier>{fae05536-b96e-48d7-a0c0-736842d3adab}</UniqueIdentifier>
@@ -194,9 +179,6 @@
     <ClCompile Include="..\Private\Packet.cpp">
       <Filter>96.Utility\packet</Filter>
     </ClCompile>
-    <ClCompile Include="..\Private\UJobQueue.cpp">
-      <Filter>96.Utility\Job</Filter>
-    </ClCompile>
     <ClCompile Include="..\Private\ULogger.cpp">
       <Filter>01.Manager\Logger</Filter>
     </ClCompile>
@@ -205,9 +187,6 @@
     </ClCompile>
     <ClCompile Include="..\Private\UCoreInstance.cpp">
       <Filter>01.Manager</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Private\IDGenerator.cpp">
-      <Filter>97.StaticClass\IDGenerator</Filter>
     </ClCompile>
     <ClCompile Include="..\Private\UThreadManager.cpp">
       <Filter>01.Manager\ThreadManager</Filter>
