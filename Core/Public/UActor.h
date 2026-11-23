@@ -76,7 +76,7 @@ public:
 		return std::static_pointer_cast<TComponent>(component);
 	}
 
-	// 장착된 USession 컴포넌트를 잠금 없이 O(1)로 돌려준다. 장착되지 않았으면 빈 포인터다.
+	// 장착된 USession 컴포넌트를 캐시된 원자 포인터로 해시 탐색 없이 잠금 없이 O(1) 돌려준다. 장착되지 않았으면 빈 포인터다.
 	virtual SHPTR<USession> GetSession() const noexcept;
 
 	// 장착된 USession의 strand에서 완성된 SafeGuard 패킷 뷰(NO_COPY)를 전달받을 때 호출된다.
@@ -93,6 +93,7 @@ private:
 	bool AddComponentInternal(const SHPTR<UComponent>& component);
 
 	ATOMIC_UINT64 _RoomID{ 0 };
+	ATOMIC<USession*> _CachedSession{ nullptr };
 	COMPONENT_CONTAINER _ComponentContainer;
 };
 

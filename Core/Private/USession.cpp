@@ -94,9 +94,9 @@ void USession::SendShared(const SHPTR<const BUFFER>& framedBuffer)
         return;
 
     // 소켓은 여러 스레드에서 동시에 사용할 수 없으므로 대기열과 송신 시작을 _Strand에서 처리한다.
-    // 게시한 작업이 실행될 때까지 Session을 유지한다.
+    // 이미 _Strand 위에서 호출된 경우 즉시 실행하고, 다른 스레드/strand에서는 _Strand에 게시한다.
     const auto submission = RUNTIME_TRACE_EVENT(Submit, USession, SendShared, GetRuntimeTraceID());
-    ASIO::post(_Strand, [session = ThisShared<USession>(), framedBuffer, submission]() mutable {
+    ASIO::dispatch(_Strand, [session = ThisShared<USession>(), framedBuffer, submission]() mutable {
         RUNTIME_TRACE_CALLBACK(USession, SendShared, session->GetRuntimeTraceID(), submission);
         if (!session->_Socket.is_open() || session->_Closed.load(std::memory_order_relaxed))
             return;

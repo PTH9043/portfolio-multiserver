@@ -32,14 +32,14 @@ SHPTR<UComponent> UActor::FindComponent(const uint32 typeID) const
 	return it->second;
 }
 
-// 장착된 USession 컴포넌트를 RTTI 비용 없이 O(1)로 바로 꺼낸다.
+// 장착된 USession 컴포넌트를 캐시된 원자 포인터로 해시 탐색·RTTI 비용 없이 O(1)로 바로 꺼낸다.
 SHPTR<USession> UActor::GetSession() const noexcept
 {
-	const auto it = _ComponentContainer.find(USession::ComponentTypeID);
-	if (it == _ComponentContainer.end())
+	USession* const cachedSession{ _CachedSession.load(std::memory_order_acquire) };
+	if (cachedSession == nullptr)
 		return nullptr;
-	// AddComponent에서 USession 파생형만 등록하도록 보장하므로 정적 캐스팅이 안전하다.
-	return std::static_pointer_cast<USession>(it->second);
+	// Append-Only 컨테이너가 USession 수명을 보장하므로 weak_from_this().lock()으로 안전하게 승격한다.
+	return std::static_pointer_cast<USession>(cachedSession->weak_from_this().lock());
 }
 
 // 기본 구현은 수신 패킷을 무시하며, 패킷을 처리하는 파생 클래스(Server::UPawn 등)에서 재정의한다.
@@ -77,7 +77,12 @@ bool UActor::AddComponentInternal(const SHPTR<UComponent>& component)
 	if (!inserted)
 		return false;
 
-	return component->AttachToOwner(self);
+	if (!component->AttachToOwner(self))
+		return false;
+
+	if (typeID == USession::ComponentTypeID)
+		_CachedSession.store(static_cast<USession*>(component.get()), std::memory_order_release);
+	return true;
 }
 
 SPACE_T
