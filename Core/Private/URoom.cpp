@@ -90,7 +90,7 @@ bool URoom::PostToRoom(FUNC<void()> task)
     return true;
 }
 
-// 방 strand 안에서 중복·정원을 검사한 뒤 액터를 O(1) 등록한다.
+// 방 strand 안에서 중복·정원을 검사한 뒤 액터를 O(1) 등록하고, 통신 액터는 브로드캐스트 대상 목록에 분리 등록한다.
 bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, TryEnterOnStrand, GetRuntimeTraceID());
@@ -101,10 +101,29 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
     if (_ActorContainer.size() >= _MaxActorCount)
         return false;
 
-    // 벡터 공간을 먼저 확보하고 인덱스 맵을 갱신한 뒤 push_back해 할당 예외 시 일관성을 유지한다.
+    SHPTR<USession> session = actor->GetSession();
+
+    // 모든 컨테이너 공간을 먼저 확보하고 인덱스 맵을 갱신해 중간 할당 예외 시 컨테이너 간 불일치를 막는다.
     _ActorContainer.reserve(_ActorContainer.size() + 1);
-    const uint64 index{ static_cast<uint64>(_ActorContainer.size()) };
-    _ActorIndexMap.emplace(actor.get(), index);
+    if (session)
+        _BroadcastTargets.reserve(_BroadcastTargets.size() + 1);
+
+    const uint64 actorIndex{ static_cast<uint64>(_ActorContainer.size()) };
+    const auto [actorIt, actorInserted] = _ActorIndexMap.emplace(actor.get(), actorIndex);
+    (void)actorInserted;
+
+    if (session) {
+        try {
+            const uint64 targetIndex{ static_cast<uint64>(_BroadcastTargets.size()) };
+            _BroadcastTargetIndexMap.emplace(actor.get(), targetIndex);
+        }
+        catch (...) {
+            _ActorIndexMap.erase(actorIt);
+            throw;
+        }
+        _BroadcastTargets.push_back(FBroadcastTarget{ actor.get(), std::move(session) });
+    }
+
     _ActorContainer.push_back(actor);
     _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
     actor->SetRoomID(_RoomID);
@@ -112,7 +131,7 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
     return true;
 }
 
-// 방 strand 안에서 swap-and-pop으로 액터를 O(1) 제거하고 퇴장 훅을 호출한다.
+// 방 strand 안에서 swap-and-pop으로 액터와 브로드캐스트 대상을 O(1) 제거하고 퇴장 훅을 호출한다.
 bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
 {
     RUNTIME_TRACE_SCOPE(URoom, LeaveOnStrand, GetRuntimeTraceID());
@@ -133,6 +152,19 @@ bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
     }
     _ActorContainer.pop_back();
     _ActorIndexMap.erase(it);
+
+    const auto targetIt = _BroadcastTargetIndexMap.find(removedActor.get());
+    if (targetIt != _BroadcastTargetIndexMap.end()) {
+        const uint64 removeTargetIndex{ targetIt->second };
+        const uint64 lastTargetIndex{ static_cast<uint64>(_BroadcastTargets.size() - 1) };
+        if (removeTargetIndex != lastTargetIndex) {
+            _BroadcastTargets[removeTargetIndex] = std::move(_BroadcastTargets[lastTargetIndex]);
+            _BroadcastTargetIndexMap[_BroadcastTargets[removeTargetIndex].Actor] = removeTargetIndex;
+        }
+        _BroadcastTargets.pop_back();
+        _BroadcastTargetIndexMap.erase(targetIt);
+    }
+
     _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
 
     removedActor->ClearRoomID(_RoomID);
@@ -159,18 +191,17 @@ void URoom::BroadcastOnStrand(const void* data, uint64 packetSize, uint16 packet
     BroadcastSharedOnStrand(framedBuffer);
 }
 
-// 미리 조립된 불변 프레임을 excludedActor를 제외한 방 내 모든 세션에 추가 복사 없이 송신한다.
+// 미리 조립된 불변 프레임을 excludedActor를 제외한 방 내 모든 통신 액터(USession)에만 추가 복사 없이 송신한다.
 void URoom::BroadcastSharedOnStrand(const SHPTR<const BUFFER>& framedBuffer, const UActor* excludedActor) const
 {
     RUNTIME_TRACE_SCOPE(URoom, BroadcastSharedOnStrand, GetRuntimeTraceID());
     if (!framedBuffer || framedBuffer->empty())
         return;
 
-    for (const auto& actor : _ActorContainer) {
-        if (!actor || actor.get() == excludedActor)
+    for (const auto& target : _BroadcastTargets) {
+        if (target.Actor == excludedActor)
             continue;
-        if (const auto session = actor->GetSession())
-            session->SendShared(framedBuffer);
+        target.Session->SendShared(framedBuffer);
     }
 }
 

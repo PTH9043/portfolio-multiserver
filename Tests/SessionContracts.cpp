@@ -78,6 +78,20 @@ public:
 	explicit UTestRoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActors)
 		: URoom{ std::move(coreInstance), context, roomID, maxActors } {}
 	uint32 GetRoomTypeID() const noexcept override { return RoomTypeID; }
+
+	bool RunOnRoomStrand(FUNC<void(UTestRoom&)> fn)
+	{
+		if (!fn)
+			return false;
+		return PostToRoom([this, fn = std::move(fn)]() mutable { fn(*this); });
+	}
+
+	uint64 QueryActorCountOnStrand() const noexcept { return GetActorCount(); }
+	uint64 QueryBroadcastTargetCountOnStrand() const noexcept { return GetBroadcastTargetCount(); }
+	void SendBroadcastOnStrand(const SHPTR<const BUFFER>& frame, const UActor* excludedActor = nullptr) const
+	{
+		BroadcastSharedOnStrand(frame, excludedActor);
+	}
 };
 
 class UOtherRoom final : public URoom {
@@ -448,6 +462,178 @@ void TestSessionNetworkAndIdleTimeoutContracts()
 	shutdownAll();
 	std::cout << "PASS Group 4: USession(UComponent) -> UActor framing, idle timeout, oversize reject, exception isolation\n";
 }
+
+// Group 5: URoom 브로드캐스트 대상 분리(_BroadcastTargets) 및 swap-and-pop 정합성 계약
+void TestRoomBroadcastTargetSeparationContracts()
+{
+	auto coreInstance = MakeShared<UCoreInstance>();
+	Require(coreInstance->Initialize(), "CoreInstance init failed");
+	auto networkManager = coreInstance->GetNetworkManager();
+	auto& ioContext = networkManager->GetIOContext();
+
+	FSessionProbeState state;
+	auto listener = MakeShared<UProbeListener>(coreInstance, ioContext, state, MILLISECONDS{ 0 });
+	BOOST_ERROR_CODE ec;
+	const uint16 port = PickFreeLoopbackPort();
+	Require(port != 0, "Invalid listener port");
+	Require(networkManager->StartListener(listener, TCP_ENDPOINT{ ASIO::ip::address_v4::loopback(), port },
+		[](const BOOST_ERROR_CODE&) {}, ec), "StartListener failed");
+
+	auto room = MakeShared<UTestRoom>(coreInstance, ioContext, 50, 32);
+	THREAD worker{ [&ioContext]() { ioContext.run(); } };
+	auto shutdownAll = [&]() {
+		networkManager->Shutdown();
+		if (worker.joinable())
+			worker.join();
+		EXCLUSIVE_LOCK_GUARD lk{ state.Lock };
+		state.AcceptedActors.clear();
+	};
+
+	auto runRoomSync = [&](FUNC<void(UTestRoom&)> fn) {
+		SHARED_MUTEX lkMutex;
+		COND_VARIABLE cv;
+		bool done{ false };
+		Require(room->RunOnRoomStrand([&](UTestRoom& r) {
+			fn(r);
+			{
+				EXCLUSIVE_LOCK_GUARD g{ lkMutex };
+				done = true;
+			}
+			cv.notify_all();
+		}), "RunOnRoomStrand failed");
+		std::unique_lock<SHARED_MUTEX> lk{ lkMutex };
+		Require(cv.wait_for(lk, 3s, [&]() { return done; }), "Room strand op timed out");
+	};
+
+	auto readExactFrameType = [](TCPSOCKET& sock) -> uint16 {
+		FPacketHeader hdr{};
+		ASIO::read(sock, ASIO::buffer(&hdr, PACKET_HEADER_SIZE));
+		if (hdr.size > 0) {
+			BUFFER body(hdr.size);
+			ASIO::read(sock, ASIO::buffer(body.data(), body.size()));
+		}
+		return hdr.type;
+	};
+
+	try {
+		IOCONTEXT clientIo;
+		const TCP_ENDPOINT ep{ ASIO::ip::address_v4::loopback(), port };
+
+		TCPSOCKET c1{ clientIo };
+		TCPSOCKET c2{ clientIo };
+		TCPSOCKET c3{ clientIo };
+		c1.connect(ep);
+		c2.connect(ep);
+		c3.connect(ep);
+
+		VECTOR<SHPTR<UActor>> players;
+		{
+			std::unique_lock<SHARED_MUTEX> lk{ state.Lock };
+			Require(state.Changed.wait_for(lk, 3s, [&]() { return state.AcceptedActors.size() >= 3; }),
+				"Expected 3 accepted players");
+			players = state.AcceptedActors;
+		}
+		auto npc1 = MakeShared<UTestActor>(coreInstance);
+		auto npc2 = MakeShared<UTestActor>(coreInstance);
+		auto npc3 = MakeShared<UTestActor>(coreInstance);
+
+		// 비세션 액터 3개 + 세션 액터 3개 혼합 입장
+		VECTOR<SHPTR<UActor>> enterOrder{ npc1, players[0], npc2, players[1], players[2], npc3 };
+		for (const auto& a : enterOrder) {
+			SHARED_MUTEX m;
+			COND_VARIABLE cv;
+			bool entered{ false };
+			bool done{ false };
+			Require(room->RequestEnter(a, [&](bool ok) {
+				{
+					EXCLUSIVE_LOCK_GUARD g{ m };
+					entered = ok;
+					done = true;
+				}
+				cv.notify_all();
+			}), "RequestEnter failed");
+			std::unique_lock<SHARED_MUTEX> lk{ m };
+			Require(cv.wait_for(lk, 3s, [&]() { return done; }) && entered, "Actor enter failed");
+		}
+
+		// 전체 액터 6명 vs 브로드캐스트 대상 3명 분리 확인 + excludedActor(players[0]) 제외 브로드캐스트 검증
+		const char msg1[] = "B1";
+		const auto frame1 = USession::MakePacketBuffer(msg1, 2, 91);
+		Require(frame1 != nullptr, "MakePacketBuffer failed");
+		uint64 totalCount{ 0 };
+		uint64 targetCount{ 0 };
+		runRoomSync([&](UTestRoom& r) {
+			totalCount = r.QueryActorCountOnStrand();
+			targetCount = r.QueryBroadcastTargetCountOnStrand();
+			r.SendBroadcastOnStrand(frame1, players[0].get());
+		});
+		Require(totalCount == 6 && targetCount == 3, "Initial actor/broadcast target count mismatch");
+		Require(readExactFrameType(c2) == 91, "c2 missed broadcast 91");
+		Require(readExactFrameType(c3) == 91, "c3 missed broadcast 91");
+
+		// 첫 번째 세션 액터(players[0])와 비세션 액터(npc2) 퇴장 -> _BroadcastTargets swap-and-pop(players[2] -> slot 0) 검증
+		auto leaveSync = [&](const SHPTR<UActor>& a) {
+			SHARED_MUTEX m;
+			COND_VARIABLE cv;
+			bool left{ false };
+			bool done{ false };
+			Require(room->RequestLeaveWithCallback(a, [&](bool ok) {
+				{
+					EXCLUSIVE_LOCK_GUARD g{ m };
+					left = ok;
+					done = true;
+				}
+				cv.notify_all();
+			}), "RequestLeaveWithCallback failed");
+			std::unique_lock<SHARED_MUTEX> lk{ m };
+			Require(cv.wait_for(lk, 3s, [&]() { return done; }) && left, "Actor leave failed");
+		};
+
+		leaveSync(players[0]);
+		leaveSync(npc2);
+
+		const char msg2[] = "B2";
+		const auto frame2 = USession::MakePacketBuffer(msg2, 2, 92);
+		runRoomSync([&](UTestRoom& r) {
+			totalCount = r.QueryActorCountOnStrand();
+			targetCount = r.QueryBroadcastTargetCountOnStrand();
+			r.SendBroadcastOnStrand(frame2);
+		});
+		Require(totalCount == 4 && targetCount == 2, "Post-leave actor/broadcast target count mismatch");
+		Require(readExactFrameType(c2) == 92, "c2 missed broadcast 92");
+		Require(readExactFrameType(c3) == 92, "c3 missed broadcast 92");
+
+		// swap-and-pop으로 slot 0에 이동한 players[2] 퇴장 후 마지막 players[1]만 수신 검증
+		leaveSync(players[2]);
+		const char msg3[] = "B3";
+		const auto frame3 = USession::MakePacketBuffer(msg3, 2, 93);
+		runRoomSync([&](UTestRoom& r) {
+			totalCount = r.QueryActorCountOnStrand();
+			targetCount = r.QueryBroadcastTargetCountOnStrand();
+			r.SendBroadcastOnStrand(frame3);
+		});
+		Require(totalCount == 3 && targetCount == 1, "After removing swapped target, count mismatch");
+		Require(readExactFrameType(c2) == 93, "c2 missed broadcast 93");
+
+		// 마지막 세션 액터 퇴장 -> 비세션 액터 2개만 남고 브로드캐스트 대상 0명
+		leaveSync(players[1]);
+		runRoomSync([&](UTestRoom& r) {
+			totalCount = r.QueryActorCountOnStrand();
+			targetCount = r.QueryBroadcastTargetCountOnStrand();
+		});
+		Require(totalCount == 2 && targetCount == 0, "Final NPC-only room count mismatch");
+
+		c1.close();
+		c2.close();
+		c3.close();
+	}
+	catch (...) {
+		shutdownAll();
+		throw;
+	}
+	shutdownAll();
+	std::cout << "PASS Group 5: URoom broadcast target separation, excludedActor & swap-and-pop contracts\n";
+}
 }
 
 int main()
@@ -458,7 +644,8 @@ int main()
 		TestComponentStaticContracts();
 		TestRoomManagerAndTransferContracts();
 		TestSessionNetworkAndIdleTimeoutContracts();
-		std::cout << "RESULT 4/4 SessionContracts groups passed\n";
+		TestRoomBroadcastTargetSeparationContracts();
+		std::cout << "RESULT 5/5 SessionContracts groups passed\n";
 		return 0;
 	}
 	catch (const std::exception& ex) {

@@ -8,6 +8,7 @@
 SPACE_H(Core)
 
 class UActor;
+class USession;
 
 // 방 종류를 식별하는 고정 키다. 상위 프로젝트(Server 등)는 UserStart 이후 값을 할당해 RTTI 없이 판별한다.
 enum class ERoomType : uint32 {
@@ -16,7 +17,7 @@ enum class ERoomType : uint32 {
 };
 
 // 액터(UActor)들이 머무는 추상 공간의 기반 클래스다.
-// 방 내부 상태(_ActorContainer·_ActorIndexMap)와 파생 방의 도메인 상태는 모두 이 Room의 strand에서만
+// 방 내부 상태(_ActorContainer·_ActorIndexMap·_BroadcastTargets·_BroadcastTargetIndexMap)와 파생 방의 도메인 상태는 모두 이 Room의 strand에서만
 // 읽고 바꾸므로 방 내부에 별도 mutex를 두지 않으며, 다른 Room의 작업과는 동시에 실행될 수 있다.
 class CORE_DLL URoom abstract : public UObject {
 public:
@@ -63,19 +64,22 @@ protected:
     // Room이 shared_ptr 소유가 아니거나 task가 비어 있으면 false다. 게시 예외는 호출자에게 전달한다.
     bool PostToRoom(FUNC<void()> task);
 
-    // 이 Room의 strand에서만 호출한다. 정원·중복을 검사해 통과하면 _ActorContainer에 등록하고
-    // actor->SetRoomID(_RoomID)와 OnActorEntered를 실행한 뒤 true를 돌려준다.
+    // 이 Room의 strand에서만 호출한다. 정원·중복을 검사해 통과하면 _ActorContainer에 등록하고,
+    // USession을 장착한 통신 액터는 _BroadcastTargets에도 분리 등록한 뒤 actor->SetRoomID(_RoomID)와 OnActorEntered를 실행한다.
     bool TryEnterOnStrand(const SHPTR<UActor>& actor);
 
-    // 이 Room의 strand에서만 호출한다. actor를 _ActorContainer에서 O(1) swap-and-pop으로 제거하고,
+    // 이 Room의 strand에서만 호출한다. actor를 _ActorContainer 및 _BroadcastTargets에서 O(1) swap-and-pop으로 제거하고,
     // actor->ClearRoomID(_RoomID) 후 OnActorLeft를 호출한다. 목록에 없었으면 false다.
     bool LeaveOnStrand(const SHPTR<UActor>& actor);
 
     // 이 Room의 strand에서만 호출한다. 반환한 참조는 현재 strand 작업 동안만 사용한다.
     const ACTOR_CONTAINER& GetActorContainer() const noexcept { return _ActorContainer; }
 
-    // 이 Room의 strand에서만 호출한다. 현재 참가 중인 액터 수다.
+    // 이 Room의 strand에서만 호출한다. 현재 참가 중인 전체 액터 수다.
     uint64 GetActorCount() const noexcept { return static_cast<uint64>(_ActorContainer.size()); }
+
+    // 이 Room의 strand에서만 호출한다. 현재 참가 중인 통신 액터(USession 장착 브로드캐스트 대상) 수다.
+    uint64 GetBroadcastTargetCount() const noexcept { return static_cast<uint64>(_BroadcastTargets.size()); }
 
     // 이 Room의 strand에서만 호출한다. 해당 액터가 현재 이 방에 속해 있는지 O(1)로 확인한다.
     bool HasActor(const UActor* actor) const noexcept;
@@ -95,14 +99,22 @@ protected:
     virtual void OnActorLeft(const SHPTR<UActor>& actor);
 
 private:
+    struct FBroadcastTarget {
+        const UActor* Actor{ nullptr };
+        SHPTR<USession> Session;
+    };
+
     using ACTOR_INDEX_MAP = UNORMAP<const UActor*, uint64>;
+    using BROADCAST_TARGET_CONTAINER = VECTOR<FBroadcastTarget>;
 
     uint64 _RoomID{ 0 };
     uint32 _MaxActorCount{ 0 };
     ATOMIC_UINT64 _PublishedActorCount{ 0 }; // 방 목록 조회용 무잠금 인원 수 스냅샷.
     ASIO::strand<IOCONTEXT::executor_type> _Strand;
-    ACTOR_CONTAINER _ActorContainer; // 이 Room의 strand에서만 접근한다.
-    ACTOR_INDEX_MAP _ActorIndexMap;  // 이 Room의 strand에서만 접근한다.
+    ACTOR_CONTAINER _ActorContainer;               // 이 Room의 strand에서만 접근한다.
+    ACTOR_INDEX_MAP _ActorIndexMap;                // 이 Room의 strand에서만 접근한다.
+    BROADCAST_TARGET_CONTAINER _BroadcastTargets;  // USession 장착 액터만 분리 유지(이 Room의 strand 전용).
+    ACTOR_INDEX_MAP _BroadcastTargetIndexMap;      // _BroadcastTargets O(1) swap-and-pop 인덱스 맵(이 Room의 strand 전용).
 };
 
 SPACE_T
