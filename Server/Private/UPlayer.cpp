@@ -297,8 +297,8 @@ void UPlayer::OnPacket(const Protocol::CSRoomList& packet)
 		summary->set_room_id(static_cast<Core::uint32>(gameRoom->GetRoomID()));
 		const Core::STRINGVIEW roomName{ gameRoom->GetRoomName().View() };
 		summary->set_name(roomName.data(), roomName.size());
-		summary->set_user_count(static_cast<Core::uint32>(gameRoom->GetApproximateActorCount()));
-		summary->set_max_users(gameRoom->GetMaxActorCount());
+		summary->set_user_count(static_cast<Core::uint32>(gameRoom->GetApproximateBroadcastTargetCount()));
+		summary->set_max_users(gameRoom->GetMaxBroadcastTargetCount());
 	}
 
 	SendPacket(Protocol::SC_ROOM_LIST, response);
@@ -325,7 +325,7 @@ void UPlayer::OnPacket(const Protocol::CSJoinRoom& packet)
 	if (targetRoomID == currentRoom->GetRoomID()) {
 		response.set_result(Protocol::JOIN_ROOM_ALREADY_IN_ROOM);
 		response.set_room_id(static_cast<Core::uint32>(currentRoom->GetRoomID()));
-		response.set_user_count(static_cast<Core::uint32>(currentRoom->GetApproximateActorCount()));
+		response.set_user_count(static_cast<Core::uint32>(currentRoom->GetApproximateBroadcastTargetCount()));
 		SendPacket(Protocol::SC_JOIN_ROOM_RESULT, response);
 		return;
 	}
@@ -600,6 +600,7 @@ void UPlayer::OnRollbackPreviousRoomCompleted(const Core::SHPTR<UGameRoom>& prev
 
 	Protocol::SCJoinRoomResult response;
 	response.set_result(Protocol::JOIN_ROOM_FULL);
+	bool rollbackFailed{ false };
 	if (result == UGameRoom::EEnterResult::Success && previousRoom) {
 		_GameRoom = previousRoom;
 		response.set_room_id(static_cast<Core::uint32>(previousRoom->GetRoomID()));
@@ -607,8 +608,14 @@ void UPlayer::OnRollbackPreviousRoomCompleted(const Core::SHPTR<UGameRoom>& prev
 	}
 	else {
 		_GameRoom.reset();
+		rollbackFailed = true;
 	}
 	SendPacket(Protocol::SC_JOIN_ROOM_RESULT, response);
+	if (rollbackFailed) {
+		_DisconnectReason = Core::FString{ "ROLLBACK_FAILED" };
+		if (const auto session = GetSession())
+			session->Close();
+	}
 }
 
 // 장착된 UServerSession에서 원격 IP를 단일 출처로 읽는다(TypeID 확인 후 static_cast).

@@ -44,8 +44,8 @@ void UNicknameRegistry::Release(const Core::STRINGVIEW nickname)
 }
 
 UGameRoom::UGameRoom(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context,
-	Core::uint64 roomID, Core::uint32 maxActorCount, Core::FString roomName)
-	: URoom{ std::move(coreInstance), context, roomID, maxActorCount },
+	Core::uint64 roomID, Core::uint32 maxActorCount, Core::FString roomName, Core::uint32 maxPlayerCount)
+	: URoom{ std::move(coreInstance), context, roomID, maxActorCount, maxPlayerCount },
 	  _RoomName{ std::move(roomName) },
 	  _CountBroadcastTimer{ context }
 {
@@ -68,7 +68,7 @@ bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUN
 	const auto submission = RUNTIME_TRACE_EVENT(Submit, UGameRoom, RequestEnterPlayer, GetRuntimeTraceID());
 	return PostToRoom([this, player, onComplete = std::move(onComplete), submission]() mutable {
 		RUNTIME_TRACE_CALLBACK(UGameRoom, RequestEnterPlayer, GetRuntimeTraceID(), submission);
-		const Core::uint32 currentCount{ static_cast<Core::uint32>(GetActorCount()) };
+		const Core::uint32 currentCount{ static_cast<Core::uint32>(GetBroadcastTargetCount()) };
 		if (!player->GetSession()) {
 			if (onComplete)
 				onComplete(EEnterResult::InvalidActor, currentCount);
@@ -79,7 +79,7 @@ bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUN
 				onComplete(EEnterResult::AlreadyEntered, currentCount);
 			return;
 		}
-		if (GetActorCount() >= GetMaxActorCount()) {
+		if (GetBroadcastTargetCount() >= GetMaxBroadcastTargetCount()) {
 			if (onComplete)
 				onComplete(EEnterResult::RoomFull, currentCount);
 			return;
@@ -92,11 +92,11 @@ bool UGameRoom::RequestEnterPlayer(const Core::SHPTR<UPlayer>& player, Core::FUN
 		_DeferEnteredCountBroadcast = false;
 		if (!entered) {
 			if (onComplete)
-				onComplete(EEnterResult::RoomFull, static_cast<Core::uint32>(GetActorCount()));
+				onComplete(EEnterResult::RoomFull, static_cast<Core::uint32>(GetBroadcastTargetCount()));
 			return;
 		}
 
-		const Core::uint32 updatedCount{ static_cast<Core::uint32>(GetActorCount()) };
+		const Core::uint32 updatedCount{ static_cast<Core::uint32>(GetBroadcastTargetCount()) };
 		ScheduleUserCountBroadcastOnStrand();
 		if (onComplete)
 			onComplete(EEnterResult::Success, updatedCount);
@@ -147,22 +147,25 @@ bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::ui
 		if (!session)
 			return;
 
-		const ACTOR_CONTAINER& actors = GetActorContainer();
-		const Core::uint64 totalCount{ static_cast<Core::uint64>(actors.size()) };
+		const BROADCAST_TARGET_CONTAINER& targets = GetBroadcastTargets();
 
 		Protocol::SCRoomUsers packet;
 		packet.set_offset(offset);
-		packet.set_total(static_cast<Core::uint32>(totalCount));
 
+		Core::uint32 playerTotal{ 0 };
 		Core::uint32 collected{ 0 };
-		for (Core::uint64 index = offset; index < totalCount && collected < ROOM_USERS_PAGE_SIZE; ++index) {
-			const UPlayer* player = TryCastPlayer(actors[index].get());
+		for (const auto& target : targets) {
+			const UPlayer* player = TryCastPlayer(target.Actor);
 			if (!player)
 				continue;
-			const Core::STRINGVIEW nickname{ player->GetInfo().Nickname.View() };
-			packet.add_nicknames(nickname.data(), nickname.size());
-			++collected;
+			if (playerTotal >= offset && collected < ROOM_USERS_PAGE_SIZE) {
+				const Core::STRINGVIEW nickname{ player->GetInfo().Nickname.View() };
+				packet.add_nicknames(nickname.data(), nickname.size());
+				++collected;
+			}
+			++playerTotal;
 		}
+		packet.set_total(playerTotal);
 
 		Core::ARRAY<Core::uint8, Core::PACKET_MAX_BODY_SIZE> buffer{};
 		Core::uint64 bodySize{ 0 };
@@ -173,20 +176,22 @@ bool UGameRoom::RequestRoomUsers(const Core::SHPTR<UPlayer>& requester, Core::ui
 	});
 }
 
-// 입장 완료 시(기본 경로) 인원 수 갱신 방송을 예약한다.
+// 입장 완료 시(기본 경로) 통신 액터인 경우에만 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorEntered(const Core::SHPTR<Core::UActor>& actor)
 {
-	(void)actor;
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorEntered, GetRuntimeTraceID());
+	if (!actor || !actor->GetSession())
+		return;
 	if (!_DeferEnteredCountBroadcast)
 		ScheduleUserCountBroadcastOnStrand();
 }
 
-// 퇴장 완료 시 남은 참가자에게 인원 수 갱신 방송을 예약한다.
+// 퇴장 완료 시 통신 액터였던 경우에만 남은 참가자에게 인원 수 갱신 방송을 예약한다.
 void UGameRoom::OnActorLeft(const Core::SHPTR<Core::UActor>& actor)
 {
-	(void)actor;
 	RUNTIME_TRACE_SCOPE(UGameRoom, OnActorLeft, GetRuntimeTraceID());
+	if (!actor || !actor->GetSession())
+		return;
 	ScheduleUserCountBroadcastOnStrand();
 }
 
@@ -216,12 +221,12 @@ void UGameRoom::FlushUserCountOnStrand()
 {
 	RUNTIME_TRACE_SCOPE(UGameRoom, FlushUserCountOnStrand, GetRuntimeTraceID());
 	_CountBroadcastPending = false;
-	const Core::uint64 actorCount{ GetActorCount() };
-	if (actorCount == 0)
+	const Core::uint64 userCount{ GetBroadcastTargetCount() };
+	if (userCount == 0)
 		return;
 
 	Protocol::SCRoomUserCount packet;
-	packet.set_count(static_cast<Core::uint32>(actorCount));
+	packet.set_count(static_cast<Core::uint32>(userCount));
 
 	Core::ARRAY<Core::uint8, Core::PACKET_MAX_BODY_SIZE> buffer{};
 	Core::uint64 bodySize{ 0 };

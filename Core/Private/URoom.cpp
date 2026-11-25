@@ -10,10 +10,13 @@
 
 SPACE_H(Core)
 
-URoom::URoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActorCount)
+URoom::URoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID,
+    uint32 maxActorCount, uint32 maxBroadcastTargetCount)
     : UObject{ std::move(coreInstance) },
       _RoomID{ roomID },
       _MaxActorCount{ maxActorCount },
+      _MaxBroadcastTargetCount{ (maxBroadcastTargetCount == 0 || maxBroadcastTargetCount > maxActorCount) ? maxActorCount : maxBroadcastTargetCount },
+      _MaxNonSessionActorCount{ (maxBroadcastTargetCount == 0 || maxBroadcastTargetCount >= maxActorCount) ? maxActorCount : (maxActorCount - maxBroadcastTargetCount) },
       _Strand{ ASIO::make_strand(context) }
 {
     RUNTIME_TRACE_EVENT(Create, URoom, URoom, GetRuntimeTraceID());
@@ -102,6 +105,16 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
         return false;
 
     SHPTR<USession> session = actor->GetSession();
+    // 통신 액터와 비세션 액터의 정원을 분리 검증해, 극한 스폰 시에도 플레이어 슬롯 잠식·과밀 입장을 차단한다.
+    if (session) {
+        if (_BroadcastTargets.size() >= _MaxBroadcastTargetCount)
+            return false;
+    }
+    else {
+        const uint64 nonSessionCount{ static_cast<uint64>(_ActorContainer.size() - _BroadcastTargets.size()) };
+        if (nonSessionCount >= _MaxNonSessionActorCount)
+            return false;
+    }
 
     // 모든 컨테이너 공간을 먼저 확보하고 인덱스 맵을 갱신해 중간 할당 예외 시 컨테이너 간 불일치를 막는다.
     _ActorContainer.reserve(_ActorContainer.size() + 1);
@@ -126,6 +139,7 @@ bool URoom::TryEnterOnStrand(const SHPTR<UActor>& actor)
 
     _ActorContainer.push_back(actor);
     _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
+    _PublishedBroadcastTargetCount.store(static_cast<uint64>(_BroadcastTargets.size()), std::memory_order_relaxed);
     actor->SetRoomID(_RoomID);
     OnActorEntered(actor);
     return true;
@@ -166,6 +180,7 @@ bool URoom::LeaveOnStrand(const SHPTR<UActor>& actor)
     }
 
     _PublishedActorCount.store(static_cast<uint64>(_ActorContainer.size()), std::memory_order_relaxed);
+    _PublishedBroadcastTargetCount.store(static_cast<uint64>(_BroadcastTargets.size()), std::memory_order_relaxed);
 
     removedActor->ClearRoomID(_RoomID);
     OnActorLeft(removedActor);

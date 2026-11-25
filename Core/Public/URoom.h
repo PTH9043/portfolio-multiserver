@@ -24,9 +24,20 @@ public:
     using ACTOR_CONTAINER = VECTOR<SHPTR<UActor>>;
 
 protected:
+    struct FBroadcastTarget {
+        const UActor* Actor{ nullptr };
+        SHPTR<USession> Session;
+    };
+
+    using BROADCAST_TARGET_CONTAINER = VECTOR<FBroadcastTarget>;
+
     // context는 Room의 strand가 작업을 실행할 io_context이며 Room과 게시한 작업이 끝날 때까지 유지해야 한다.
     // roomID는 0이 아닌 고유 방 식별자다.
-    explicit URoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActorCount);
+    // maxBroadcastTargetCount가 0이면 단일 정원 모드(전체·통신 액터 상한=maxActorCount)로 동작하고,
+    // 0보다 크면 통신 액터 상한(maxBroadcastTargetCount)과 비세션 액터 상한(maxActorCount - maxBroadcastTargetCount)을 분리해
+    // 비세션 액터 폭주가 플레이어 슬롯을 잠식하지 못하게 막는다.
+    explicit URoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID,
+        uint32 maxActorCount, uint32 maxBroadcastTargetCount = 0);
 
 public:
     virtual ~URoom() override;
@@ -38,11 +49,17 @@ public:
     // 생성 시 확정된 방 식별자다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
     uint64 GetRoomID() const noexcept { return _RoomID; }
 
-    // 생성 시 지정된 방의 최대 액터 정원이다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
+    // 생성 시 지정된 방의 최대 전체 액터 정원이다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
     uint32 GetMaxActorCount() const noexcept { return _MaxActorCount; }
 
-    // 어느 스레드에서나 잠금 없이 읽을 수 있는 현재 방 인원 수 스냅샷이다(입·퇴장 시 strand에서 원자 갱신).
+    // 생성 시 지정된 방의 최대 통신 액터(USession 장착) 정원이다. 어느 스레드에서나 잠금 없이 읽을 수 있다.
+    uint32 GetMaxBroadcastTargetCount() const noexcept { return _MaxBroadcastTargetCount; }
+
+    // 어느 스레드에서나 잠금 없이 읽을 수 있는 현재 방 전체 액터 수 스냅샷이다(입·퇴장 시 strand에서 원자 갱신).
     uint64 GetApproximateActorCount() const noexcept { return _PublishedActorCount.load(std::memory_order_relaxed); }
+
+    // 어느 스레드에서나 잠금 없이 읽을 수 있는 현재 방 통신 액터(USession 장착) 수 스냅샷이다(입·퇴장 시 strand에서 원자 갱신).
+    uint64 GetApproximateBroadcastTargetCount() const noexcept { return _PublishedBroadcastTargetCount.load(std::memory_order_relaxed); }
 
     // 어느 스레드에서나 호출할 수 있다. true는 게시 성공이며 정원·중복 판정과 입장 결과는
     // onComplete(선택)로 이 Room의 strand에서 전달한다.
@@ -75,6 +92,9 @@ protected:
     // 이 Room의 strand에서만 호출한다. 반환한 참조는 현재 strand 작업 동안만 사용한다.
     const ACTOR_CONTAINER& GetActorContainer() const noexcept { return _ActorContainer; }
 
+    // 이 Room의 strand에서만 호출한다. USession을 장착한 통신 액터 목록 참조다(현재 strand 작업 동안만 사용).
+    const BROADCAST_TARGET_CONTAINER& GetBroadcastTargets() const noexcept { return _BroadcastTargets; }
+
     // 이 Room의 strand에서만 호출한다. 현재 참가 중인 전체 액터 수다.
     uint64 GetActorCount() const noexcept { return static_cast<uint64>(_ActorContainer.size()); }
 
@@ -99,17 +119,14 @@ protected:
     virtual void OnActorLeft(const SHPTR<UActor>& actor);
 
 private:
-    struct FBroadcastTarget {
-        const UActor* Actor{ nullptr };
-        SHPTR<USession> Session;
-    };
-
     using ACTOR_INDEX_MAP = UNORMAP<const UActor*, uint64>;
-    using BROADCAST_TARGET_CONTAINER = VECTOR<FBroadcastTarget>;
 
     uint64 _RoomID{ 0 };
     uint32 _MaxActorCount{ 0 };
-    ATOMIC_UINT64 _PublishedActorCount{ 0 }; // 방 목록 조회용 무잠금 인원 수 스냅샷.
+    uint32 _MaxBroadcastTargetCount{ 0 };
+    uint32 _MaxNonSessionActorCount{ 0 };
+    ATOMIC_UINT64 _PublishedActorCount{ 0 };           // 방 목록 조회용 무잠금 전체 액터 수 스냅샷.
+    ATOMIC_UINT64 _PublishedBroadcastTargetCount{ 0 }; // 방 목록 조회용 무잠금 통신 액터 수 스냅샷.
     ASIO::strand<IOCONTEXT::executor_type> _Strand;
     ACTOR_CONTAINER _ActorContainer;               // 이 Room의 strand에서만 접근한다.
     ACTOR_INDEX_MAP _ActorIndexMap;                // 이 Room의 strand에서만 접근한다.

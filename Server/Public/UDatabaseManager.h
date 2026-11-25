@@ -35,7 +35,8 @@ public:
 	// UThreadManager::RegisterFunc에 DB 전용 스레드(_Config.WorkerCount개)를 등록한다.
 	bool RegisterWorkers(const Core::SHPTR<Core::UThreadManager>& threadManager, FWorkerFinishedCallback onWorkerFinished);
 
-	// 모든 네트워크 워커가 종료된 뒤 호출한다. 큐에 남은 작업(로그아웃 기록 등)을 전부 처리하고 DB 워커를 끝낸다.
+	// 모든 네트워크 워커가 종료된 뒤 호출한다. 큐에 남은 로그아웃 기록(FLogoutTask)만 끝까지 배수하고
+	// 이미 연결이 끊긴 가입·로그인 대기 작업은 건너뛴 뒤 DB 워커를 끝낸다.
 	void RequestStop() noexcept;
 
 	// 비동기 회원가입 요청을 DB 전용 큐에 적재한다(네트워크 스레드 비블로킹).

@@ -42,10 +42,10 @@ public:
 	}
 
 	template<typename U>
-	bool operator==(const USTLAllocator<U>&) { return true; }
+	bool operator==(const USTLAllocator<U>&) const noexcept { return true; }
 
 	template<typename U>
-	bool operator!=(const USTLAllocator<U>&) { return false; }
+	bool operator!=(const USTLAllocator<U>&) const noexcept { return false; }
 };
 
 SPACE_T

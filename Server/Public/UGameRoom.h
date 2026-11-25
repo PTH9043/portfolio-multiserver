@@ -41,7 +41,8 @@ public:
 	};
 
 	explicit UGameRoom(Core::SHPTR<Core::UCoreInstance> coreInstance, Core::IOCONTEXT& context,
-		Core::uint64 roomID, Core::uint32 maxActorCount, Core::FString roomName = Core::FString{ "로비" });
+		Core::uint64 roomID, Core::uint32 maxActorCount, Core::FString roomName = Core::FString{ "로비" },
+		Core::uint32 maxPlayerCount = 0);
 	virtual ~UGameRoom() override;
 	NO_COPY(UGameRoom)
 

@@ -162,15 +162,21 @@ void UDatabaseManager::WorkerLoop() noexcept
 
 		for (;;) {
 			FDbTask task;
+			bool stopping{ false };
 			{
 				std::unique_lock<Core::SHARED_MUTEX> lock{ _QueueMutex };
 				_QueueCV.wait(lock, [this]() { return _StopRequested || !_TaskQueue.empty(); });
-				// 종료 신호가 와도 큐에 남은 로그아웃 기록 등을 끝까지 배수(Drain)한 뒤 종료한다.
+				// 종료 신호가 와도 큐에 남은 로그아웃 기록(FLogoutTask)은 끝까지 배수(Drain)한다.
+				// 반면 이미 네트워크 워커가 종료돼 응답할 소켓이 없는 가입·로그인 대기 작업은 건너뛰어 종료 지연을 막는다.
 				if (_TaskQueue.empty())
 					break;
+				stopping = _StopRequested;
 				task = std::move(_TaskQueue.front());
 				_TaskQueue.pop_front();
 			}
+
+			if (stopping && !std::holds_alternative<FLogoutTask>(task.Payload))
+				continue;
 
 			RUNTIME_TRACE_CALLBACK(UDatabaseManager, ExecuteTask, workerTrace.Get(), task.TraceSubmitSeq);
 			ExecuteTask(connection, task);

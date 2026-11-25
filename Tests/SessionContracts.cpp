@@ -75,8 +75,8 @@ public:
 class UTestRoom final : public URoom {
 public:
 	STATIC_CONSTEXPR uint32 RoomTypeID{ static_cast<uint32>(ERoomType::UserStart) };
-	explicit UTestRoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActors)
-		: URoom{ std::move(coreInstance), context, roomID, maxActors } {}
+	explicit UTestRoom(SHPTR<UCoreInstance> coreInstance, IOCONTEXT& context, uint64 roomID, uint32 maxActors, uint32 maxBroadcastTargets = 0)
+		: URoom{ std::move(coreInstance), context, roomID, maxActors, maxBroadcastTargets } {}
 	uint32 GetRoomTypeID() const noexcept override { return RoomTypeID; }
 
 	bool RunOnRoomStrand(FUNC<void(UTestRoom&)> fn)
@@ -634,6 +634,112 @@ void TestRoomBroadcastTargetSeparationContracts()
 	shutdownAll();
 	std::cout << "PASS Group 5: URoom broadcast target separation, excludedActor & swap-and-pop contracts\n";
 }
+
+// Group 6: URoom 이중 정원 격리(플레이어 상한 vs 비세션 오브젝트 상한) 극한 상황 방어 계약
+void TestRoomDualCapacityIsolationContracts()
+{
+	auto coreInstance = MakeShared<UCoreInstance>();
+	Require(coreInstance->Initialize(), "CoreInstance init failed");
+	auto networkManager = coreInstance->GetNetworkManager();
+	auto& ioContext = networkManager->GetIOContext();
+
+	// 전체 정원 10, 통신 액터(플레이어) 정원 2 -> 비세션 액터(몬스터·트랙 오브젝트) 전용 상한 8
+	auto room = MakeShared<UTestRoom>(coreInstance, ioContext, 60, 10, 2);
+	Require(room->GetMaxActorCount() == 10 && room->GetMaxBroadcastTargetCount() == 2,
+		"Dual capacity getter mismatch");
+
+	THREAD worker{ [&ioContext]() { ioContext.run(); } };
+	auto shutdownAll = [&]() {
+		networkManager->Shutdown();
+		if (worker.joinable())
+			worker.join();
+	};
+
+	auto enterSync = [&](const SHPTR<UActor>& a) -> bool {
+		SHARED_MUTEX m;
+		COND_VARIABLE cv;
+		bool entered{ false };
+		bool done{ false };
+		Require(room->RequestEnter(a, [&](bool ok) {
+			{
+				EXCLUSIVE_LOCK_GUARD g{ m };
+				entered = ok;
+				done = true;
+			}
+			cv.notify_all();
+		}), "RequestEnter failed");
+		std::unique_lock<SHARED_MUTEX> lk{ m };
+		Require(cv.wait_for(lk, 3s, [&]() { return done; }), "Enter timed out");
+		return entered;
+	};
+
+	auto leaveSync = [&](const SHPTR<UActor>& a) -> bool {
+		SHARED_MUTEX m;
+		COND_VARIABLE cv;
+		bool left{ false };
+		bool done{ false };
+		Require(room->RequestLeaveWithCallback(a, [&](bool ok) {
+			{
+				EXCLUSIVE_LOCK_GUARD g{ m };
+				left = ok;
+				done = true;
+			}
+			cv.notify_all();
+		}), "RequestLeaveWithCallback failed");
+		std::unique_lock<SHARED_MUTEX> lk{ m };
+		Require(cv.wait_for(lk, 3s, [&]() { return done; }), "Leave timed out");
+		return left;
+	};
+
+	auto makePlayer = [&]() -> SHPTR<UActor> {
+		auto a = MakeShared<UTestActor>(coreInstance);
+		auto s = MakeShared<USession>(coreInstance, TCPSOCKET{ ioContext });
+		Require(a->AddComponent(s), "AddComponent(USession) failed");
+		return a;
+	};
+
+	try {
+		// 6-1. 비세션 액터 8개 폭주 스폰 -> 8개까지 허용, 9번째는 플레이어 슬롯 보호를 위해 차단
+		VECTOR<SHPTR<UActor>> objects;
+		for (uint64 i = 0; i < 8; ++i) {
+			auto obj = MakeShared<UTestActor>(coreInstance);
+			Require(enterSync(obj), "Non-session actor within quota rejected");
+			objects.push_back(std::move(obj));
+		}
+		auto overflowObj = MakeShared<UTestActor>(coreInstance);
+		Require(!enterSync(overflowObj), "9th non-session actor must not steal reserved player slots");
+		Require(room->GetApproximateActorCount() == 8 && room->GetApproximateBroadcastTargetCount() == 0,
+			"Counts mismatch after non-session fill");
+
+		// 6-2. 비세션 상한이 꽉 찬 상태에서도 예약된 플레이어 2명은 정상 입장
+		auto p1 = makePlayer();
+		auto p2 = makePlayer();
+		auto p3 = makePlayer();
+		Require(enterSync(p1), "Player 1 starved by non-session actors");
+		Require(enterSync(p2), "Player 2 starved by non-session actors");
+		Require(room->GetApproximateActorCount() == 10 && room->GetApproximateBroadcastTargetCount() == 2,
+			"Counts mismatch after players entered");
+
+		// 6-3. 비세션 4개가 퇴장해 전체 여유 공간이 생겨도, 플레이어 상한(2명)을 넘는 3번째 플레이어는 하드 차단
+		for (uint64 i = 0; i < 4; ++i)
+			Require(leaveSync(objects[i]), "Object leave failed");
+		Require(room->GetApproximateActorCount() == 6 && room->GetApproximateBroadcastTargetCount() == 2,
+			"Counts mismatch after object leave");
+		Require(!enterSync(p3), "3rd player must be rejected by maxBroadcastTargetCount even when actor slots are free");
+
+		// 6-4. 기존 플레이어 1명이 퇴장하면 3번째 플레이어가 정상 입장
+		Require(leaveSync(p1), "Player 1 leave failed");
+		Require(enterSync(p3), "Player 3 should enter after player slot freed");
+		Require(room->GetApproximateActorCount() == 6 && room->GetApproximateBroadcastTargetCount() == 2,
+			"Final dual-capacity counts mismatch");
+	}
+	catch (...) {
+		shutdownAll();
+		throw;
+	}
+	shutdownAll();
+	std::cout << "PASS Group 6: URoom dual capacity isolation (player cap vs non-session object cap) contracts\n";
+}
 }
 
 int main()
@@ -645,7 +751,8 @@ int main()
 		TestRoomManagerAndTransferContracts();
 		TestSessionNetworkAndIdleTimeoutContracts();
 		TestRoomBroadcastTargetSeparationContracts();
-		std::cout << "RESULT 5/5 SessionContracts groups passed\n";
+		TestRoomDualCapacityIsolationContracts();
+		std::cout << "RESULT 6/6 SessionContracts groups passed\n";
 		return 0;
 	}
 	catch (const std::exception& ex) {
