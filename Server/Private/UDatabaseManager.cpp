@@ -4,7 +4,6 @@
 #include "ULogger.h"
 
 #include <mysql.h>
-#include <mutex>
 #include <utility>
 
 #include "RuntimeTrace.h"
@@ -73,13 +72,10 @@ bool UDatabaseManager::RegisterWorkers(const Core::SHPTR<Core::UThreadManager>& 
 void UDatabaseManager::RequestStop() noexcept
 {
 	RUNTIME_TRACE_SCOPE(UDatabaseManager, RequestStop, GetRuntimeTraceID());
-	{
-		Core::EXCLUSIVE_LOCK_GUARD lock{ _QueueMutex };
-		if (_StopRequested)
-			return;
-		_StopRequested = true;
-	}
-	_QueueCV.notify_all();
+	if (_StopRequested.exchange(true, std::memory_order_seq_cst))
+		return;
+	_WakeEpoch.fetch_add(1, std::memory_order_seq_cst);
+	_WakeEpoch.notify_all();
 }
 
 bool UDatabaseManager::EnqueueRegister(Core::FString username, Core::FString password, Core::FString nickname,
@@ -90,15 +86,8 @@ bool UDatabaseManager::EnqueueRegister(Core::FString username, Core::FString pas
 		return false;
 
 	const Core::uint64 submitSeq = RUNTIME_TRACE_EVENT(Submit, UDatabaseManager, EnqueueRegister, GetRuntimeTraceID());
-	{
-		Core::EXCLUSIVE_LOCK_GUARD lock{ _QueueMutex };
-		if (_StopRequested || _TaskQueue.size() >= DB_MAX_AUTH_PENDING_TASKS)
-			return false;
-		FRegisterTask payload{ std::move(username), std::move(password), std::move(nickname), std::move(callback) };
-		_TaskQueue.push_back(FDbTask{ std::move(payload), submitSeq });
-	}
-	_QueueCV.notify_one();
-	return true;
+	FRegisterTask payload{ std::move(username), std::move(password), std::move(nickname), std::move(callback) };
+	return EnqueueTask(std::move(payload), DB_MAX_AUTH_PENDING_TASKS, submitSeq);
 }
 
 bool UDatabaseManager::EnqueueLogin(Core::FString username, Core::FString password, Core::FString remoteIp,
@@ -109,15 +98,8 @@ bool UDatabaseManager::EnqueueLogin(Core::FString username, Core::FString passwo
 		return false;
 
 	const Core::uint64 submitSeq = RUNTIME_TRACE_EVENT(Submit, UDatabaseManager, EnqueueLogin, GetRuntimeTraceID());
-	{
-		Core::EXCLUSIVE_LOCK_GUARD lock{ _QueueMutex };
-		if (_StopRequested || _TaskQueue.size() >= DB_MAX_AUTH_PENDING_TASKS)
-			return false;
-		FLoginTask payload{ std::move(username), std::move(password), std::move(remoteIp), std::move(callback) };
-		_TaskQueue.push_back(FDbTask{ std::move(payload), submitSeq });
-	}
-	_QueueCV.notify_one();
-	return true;
+	FLoginTask payload{ std::move(username), std::move(password), std::move(remoteIp), std::move(callback) };
+	return EnqueueTask(std::move(payload), DB_MAX_AUTH_PENDING_TASKS, submitSeq);
 }
 
 bool UDatabaseManager::EnqueueLogout(const Core::uint64 logId, const Core::uint32 lastRoomId,
@@ -128,15 +110,42 @@ bool UDatabaseManager::EnqueueLogout(const Core::uint64 logId, const Core::uint3
 		return false;
 
 	const Core::uint64 submitSeq = RUNTIME_TRACE_EVENT(Submit, UDatabaseManager, EnqueueLogout, GetRuntimeTraceID());
-	{
-		Core::EXCLUSIVE_LOCK_GUARD lock{ _QueueMutex };
-		// 로그아웃 기록은 종료 직전 네트워크 정리 중에도 들어올 수 있으므로 일반 인증 상한보다 넓은 여유를 둔다.
-		if (_StopRequested || _TaskQueue.size() >= DB_MAX_TOTAL_PENDING_TASKS)
+	// 로그아웃 기록은 종료 직전 네트워크 정리 중에도 들어올 수 있으므로 일반 인증 상한보다 넓은 여유를 둔다.
+	FLogoutTask payload{ logId, lastRoomId, std::move(disconnectReason) };
+	return EnqueueTask(std::move(payload), DB_MAX_TOTAL_PENDING_TASKS, submitSeq);
+}
+
+bool UDatabaseManager::TryReservePendingSlot(const Core::uint64 limit) noexcept
+{
+	Core::uint64 current = _PendingCount.load(std::memory_order_relaxed);
+	for (;;) {
+		if (current >= limit)
 			return false;
-		FLogoutTask payload{ logId, lastRoomId, std::move(disconnectReason) };
-		_TaskQueue.push_back(FDbTask{ std::move(payload), submitSeq });
+		if (_PendingCount.compare_exchange_strong(
+			current, current + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+			return true;
+		}
 	}
-	_QueueCV.notify_one();
+}
+
+bool UDatabaseManager::EnqueueTask(FTaskPayload&& payload, const Core::uint64 limit, const Core::uint64 submitSeq)
+{
+	if (_StopRequested.load(std::memory_order_acquire))
+		return false;
+
+	if (!TryReservePendingSlot(limit))
+		return false;
+
+	try {
+		_TaskQueue.push(FDbTask{ std::move(payload), submitSeq });
+	}
+	catch (...) {
+		_PendingCount.fetch_sub(1, std::memory_order_release);
+		throw;
+	}
+
+	_WakeEpoch.fetch_add(1, std::memory_order_seq_cst);
+	_WakeEpoch.notify_one();
 	return true;
 }
 
@@ -153,7 +162,7 @@ void UDatabaseManager::WorkerLoop() noexcept
 	const Core::FRuntimeTraceID workerTrace;
 	RUNTIME_TRACE_SCOPE(UDatabaseManager, WorkerLoop, workerTrace.Get());
 
-	// DB 전용 스레드 1개가 자기 전용 MySQL 커넥션 1개를 RAII로 영구 소유한다(커넥션 락 경합 0).
+	// DB 전용 스레드 1개가 자기 전용 MySQL 커넥션 1개를 RAII로 영구 소유한다(큐·커넥션 락 경합 0).
 	{
 		FMySqlConnection connection{ _Config };
 		Core::FString connectError;
@@ -162,20 +171,36 @@ void UDatabaseManager::WorkerLoop() noexcept
 
 		for (;;) {
 			FDbTask task;
-			bool stopping{ false };
-			{
-				std::unique_lock<Core::SHARED_MUTEX> lock{ _QueueMutex };
-				_QueueCV.wait(lock, [this]() { return _StopRequested || !_TaskQueue.empty(); });
+			bool popped{ false };
+			for (;;) {
+				if (_TaskQueue.try_pop(task)) {
+					_PendingCount.fetch_sub(1, std::memory_order_release);
+					popped = true;
+					break;
+				}
+				const Core::uint32 observedEpoch = _WakeEpoch.load(std::memory_order_seq_cst);
 				// 종료 신호가 와도 큐에 남은 로그아웃 기록(FLogoutTask)은 끝까지 배수(Drain)한다.
 				// 반면 이미 네트워크 워커가 종료돼 응답할 소켓이 없는 가입·로그인 대기 작업은 건너뛰어 종료 지연을 막는다.
-				if (_TaskQueue.empty())
+				if (_StopRequested.load(std::memory_order_acquire)) {
+					if (_TaskQueue.try_pop(task)) {
+						_PendingCount.fetch_sub(1, std::memory_order_release);
+						popped = true;
+					}
 					break;
-				stopping = _StopRequested;
-				task = std::move(_TaskQueue.front());
-				_TaskQueue.pop_front();
+				}
+				// 에포크 관찰 직후 재확인으로 깨우기 유실(Lost Wakeup)을 차단한다.
+				if (_TaskQueue.try_pop(task)) {
+					_PendingCount.fetch_sub(1, std::memory_order_release);
+					popped = true;
+					break;
+				}
+				_WakeEpoch.wait(observedEpoch, std::memory_order_acquire);
 			}
 
-			if (stopping && !std::holds_alternative<FLogoutTask>(task.Payload))
+			if (!popped)
+				break;
+
+			if (_StopRequested.load(std::memory_order_acquire) && !std::holds_alternative<FLogoutTask>(task.Payload))
 				continue;
 
 			RUNTIME_TRACE_CALLBACK(UDatabaseManager, ExecuteTask, workerTrace.Get(), task.TraceSubmitSeq);

@@ -13,9 +13,9 @@ SPACE_T
 SPACE_H(Server)
 
 // DB 전용 스레드 풀 관리자다.
-// 네트워크 워커와 URoom Strand에서 DB를 직접 호출하지 않고 이 관리자의 유계 작업 큐로 넘긴다.
+// 네트워크 워커와 URoom Strand에서 DB를 직접 호출하지 않고 이 관리자의 무잠금 유계 작업 큐(Core::CONQUEUE)로 넘긴다.
 // UThreadManager::RegisterFunc로 등록된 DB 전용 워커들이 각자 전용 FMySqlConnection 1개를 소유해
-// 커넥션 풀 잠금 경합 없이 Prepared Statement를 실행하고, 종료 시 잔여 로그아웃 기록을 전부 배수한다.
+// 큐·커넥션 잠금 경합 없이 Prepared Statement를 실행하고, 종료 시 잔여 로그아웃 기록을 전부 배수한다.
 class UDatabaseManager final : public Core::UObject {
 public:
 	STATIC_CONSTEXPR Core::uint64 DB_MAX_AUTH_PENDING_TASKS{ 4096 };
@@ -81,6 +81,8 @@ private:
 		Core::uint64 TraceSubmitSeq{ 0 };
 	};
 
+	bool TryReservePendingSlot(Core::uint64 limit) noexcept;
+	bool EnqueueTask(FTaskPayload&& payload, Core::uint64 limit, Core::uint64 submitSeq);
 	static void RunWorker(void* data) noexcept;
 	void WorkerLoop() noexcept;
 	void ExecuteTask(FMySqlConnection& connection, FDbTask& task) noexcept;
@@ -88,10 +90,13 @@ private:
 
 	FDbConfig _Config;
 	bool _LibraryInitialized{ false };
-	Core::SHARED_MUTEX _QueueMutex;
-	Core::COND_VARIABLE _QueueCV;
-	Core::DEQUE<FDbTask> _TaskQueue;
-	bool _StopRequested{ false };
+	Core::CONQUEUE<FDbTask> _TaskQueue;
+	// Core::MakeShared(USTLAllocator)는 기본 정렬(max_align_t)만 허용하므로 alignas(64) 대신 명시 패딩으로 거짓 공유를 분리한다.
+	Core::ARRAY<Core::uint8, 64> _PadPending{};
+	Core::ATOMIC_UINT64 _PendingCount{ 0 };
+	Core::ARRAY<Core::uint8, 64> _PadWake{};
+	Core::ATOMIC<Core::uint32> _WakeEpoch{ 0 };
+	Core::ATOMIC_BOOL _StopRequested{ false };
 	FWorkerFinishedCallback _OnWorkerFinished;
 };
 
